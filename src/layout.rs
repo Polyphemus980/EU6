@@ -1,6 +1,6 @@
-﻿use crate::consts;
-use crate::hex::Hex;
-use crate::map::{HexMap, InteractionState, SelectedProvince};
+﻿use crate::hex::Hex;
+use crate::map::{HexMap, InteractionState, MapMode, SelectedProvince};
+use crate::{consts, map};
 use bevy::camera::{Camera, Camera2d, Projection};
 use bevy::input::mouse::MouseWheel;
 use bevy::input::ButtonInput;
@@ -16,6 +16,7 @@ use bevy::window::PrimaryWindow;
 pub(crate) fn camera_keyboard_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut query: Query<&mut Transform, With<Camera2d>>,
+    mut map_mode: ResMut<MapMode>,
     time: Res<Time>,
 ) {
     let mut movement = Vec3::ZERO;
@@ -32,6 +33,11 @@ pub(crate) fn camera_keyboard_system(
     }
     if keyboard.pressed(KeyCode::KeyS) {
         movement.y -= speed;
+    }
+
+    if keyboard.just_pressed(KeyCode::KeyM) {
+        info!("Switching map mode");
+        map::switch_map_mode(&mut map_mode);
     }
 
     for mut transform in &mut query {

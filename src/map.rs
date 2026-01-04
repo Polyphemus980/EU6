@@ -1,13 +1,21 @@
 ﻿use crate::consts;
+use crate::country::MapColor;
 use crate::hex::Hex;
 use bevy::asset::Assets;
 use bevy::color::{Color, Mix};
 use bevy::mesh::{Mesh, Mesh2d};
 use bevy::prelude::{
-    Changed, ColorMaterial, Commands, Component, Entity, MeshMaterial2d, Query, RegularPolygon,
-    ResMut, Resource, Transform,
+    ColorMaterial, Commands, Component, Entity, MeshMaterial2d, Query, RegularPolygon, ResMut,
+    Resource, Transform,
 };
 use std::collections::HashMap;
+
+#[derive(Resource, Default, PartialEq)]
+pub(crate) enum MapMode {
+    #[default]
+    Terrain,
+    Political,
+}
 
 /// Resource mapping hex coordinates to province entities. Allows clicking on hex tiles to find
 /// the corresponding province.
@@ -50,18 +58,31 @@ pub(crate) enum InteractionState {
     Selected,
 }
 
+#[derive(Component)]
+pub(crate) struct Owner(pub(crate) Entity);
+
 /// Component representing a province on the map.
 #[derive(Component)]
 pub(crate) struct Province {
-    id: u32,
     name: String,
     hex: Hex,
     terrain: Terrain,
 }
 
 impl Province {
+    /// Returns the color associated with the province's terrain type.
     fn color(&self) -> Color {
         self.terrain.color()
+    }
+
+    /// Returns a reference to the hex coordinates of the province.
+    pub(crate) fn get_hex(&self) -> &Hex {
+        &self.hex
+    }
+
+    /// Determines if the province can be owned by a country based on its terrain type.
+    pub(crate) fn is_ownable(&self) -> bool {
+        !matches!(self.terrain, Terrain::Sea | Terrain::Wasteland)
     }
 }
 
@@ -70,17 +91,19 @@ const COLOR_HILLS: Color = Color::srgb(0.58, 0.44, 0.27); // Muted brown
 const COLOR_MOUNTAINS: Color = Color::srgb(0.45, 0.45, 0.5); // Slate gray
 const COLOR_FOREST: Color = Color::srgb(0.07, 0.31, 0.12); // Deep dark green
 const COLOR_DESERT: Color = Color::srgb(0.93, 0.79, 0.48); // Sandy yellow/tan
+const COLOR_WASTELAND: Color = Color::srgb(0.55, 0.50, 0.45); // Barren grayish-brown
 
-const COLOR_SEA: Color = Color::srgb(0.0, 0.53, 0.74);
+const COLOR_SEA: Color = Color::srgb(0.0, 0.53, 0.74); // Ocean blue
 
 /// Enum representing different terrain types for provinces.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum Terrain {
     Plains,
     Hills,
     Mountains,
     Forest,
     Desert,
+    Wasteland,
     Sea,
 }
 
@@ -92,6 +115,7 @@ impl Terrain {
             Terrain::Mountains => COLOR_MOUNTAINS,
             Terrain::Forest => COLOR_FOREST,
             Terrain::Desert => COLOR_DESERT,
+            Terrain::Wasteland => COLOR_WASTELAND,
             Terrain::Sea => COLOR_SEA,
         }
     }
@@ -118,17 +142,47 @@ pub(crate) fn generate_map(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    let map_radius = 5i32;
+    let map_radius = 8i32;
 
     for q in -map_radius..=map_radius {
         for r in -map_radius..=map_radius {
             let hex = Hex::new(q, r);
 
+            // Calculate distance from center for terrain generation
+            let distance = hex.distance(&Hex::ZERO);
+
+            // Skip hexes outside the map radius
+            if distance > map_radius {
+                continue;
+            }
+
+            // Generate terrain based on distance from center and position
+            let terrain = if distance >= map_radius - 1 {
+                // Outer ring is sea
+                Terrain::Sea
+            } else if distance >= map_radius - 2 {
+                // Next ring is mostly wasteland with some sea
+                if (q + r) % 3 == 0 {
+                    Terrain::Wasteland
+                } else {
+                    Terrain::Sea
+                }
+            } else {
+                // Inner areas have varied terrain
+                match ((q.abs() + r.abs()) % 5) as u8 {
+                    0 => Terrain::Plains,
+                    1 => Terrain::Hills,
+                    2 => Terrain::Forest,
+                    3 => Terrain::Mountains,
+                    4 => Terrain::Desert,
+                    _ => Terrain::Plains,
+                }
+            };
+
             let province = Province {
-                id: 1,
                 name: format!("Province_{}_{}", q, r),
                 hex,
-                terrain: Terrain::from(((q + r) % 6) as u8),
+                terrain,
             };
 
             let province_entity =
@@ -147,7 +201,13 @@ fn build_province_entity(
     materials: &mut ResMut<Assets<ColorMaterial>>,
     province: Province,
     size: f32,
-) -> (Province, Mesh2d, MeshMaterial2d<ColorMaterial>, Transform) {
+) -> (
+    Province,
+    Mesh2d,
+    MeshMaterial2d<ColorMaterial>,
+    Transform,
+    InteractionState,
+) {
     let mesh = Mesh::from(RegularPolygon::new(size, 6));
     let mesh_handle = meshes.add(mesh);
 
@@ -162,16 +222,15 @@ fn build_province_entity(
         Mesh2d(mesh_handle),
         MeshMaterial2d(material_handle),
         transform,
+        InteractionState::None,
     )
 }
 
-/// System to update province visuals based on selection and hover states.
-pub(crate) fn province_visual_system(
+/// System to update province visuals based on if the province is selected or not. Uses
+/// province's terrain color.
+pub(crate) fn render_province_terrain(
     mut materials: ResMut<Assets<ColorMaterial>>,
-    query: Query<
-        (&Province, &MeshMaterial2d<ColorMaterial>, &InteractionState),
-        Changed<InteractionState>,
-    >,
+    query: Query<(&Province, &MeshMaterial2d<ColorMaterial>, &InteractionState)>,
 ) {
     for (province, material, state) in &query {
         if let Some(mat) = materials.get_mut(&material.0) {
@@ -183,4 +242,43 @@ pub(crate) fn province_visual_system(
             };
         }
     }
+}
+
+/// System to update province visuals based on if the province is selected or not. Uses
+/// province's owner color
+pub(crate) fn render_province_political(
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    query: Query<(
+        &Province,
+        Option<&Owner>,
+        &MeshMaterial2d<ColorMaterial>,
+        &InteractionState,
+    )>,
+    country_query: Query<&MapColor>,
+) {
+    for (province, maybe_owner, material, state) in query {
+        if let Some(mat) = materials.get_mut(&material.0) {
+            let base_color = if let Some(owner) = maybe_owner {
+                if let Ok(map_color) = country_query.get(owner.0) {
+                    map_color.0
+                } else {
+                    province.color()
+                }
+            } else {
+                province.color()
+            };
+
+            mat.color = match *state {
+                InteractionState::Selected => base_color.mix(&Color::srgb(1.0, 0.9, 0.0), 0.4),
+                InteractionState::None => base_color,
+            };
+        }
+    }
+}
+
+pub(crate) fn switch_map_mode(map_mode: &mut ResMut<MapMode>) {
+    **map_mode = match **map_mode {
+        MapMode::Terrain => MapMode::Political,
+        MapMode::Political => MapMode::Terrain,
+    };
 }

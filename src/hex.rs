@@ -31,6 +31,9 @@ impl Hex {
     const WORLD_TO_AXIAL_MATRIX: Mat2 =
         Mat2::from_cols_array(&[Self::SQRT_3 / 3.0, 0.0, -1.0 / 3.0, 2.0 / 3.0]);
 
+    /// The origin hex at (0,0).
+    pub(crate) const ZERO: Hex = Hex { q: 0, r: 0 };
+
     /// Converts axial coordinates to world coordinates. Used for displaying hexes on the map.
     /// This assumes origin point at (0,0) - if the map origin is elsewhere, an offset should be applied.
     pub(crate) fn axial_to_world(&self, size: f32) -> Vec2 {
@@ -66,8 +69,19 @@ impl Hex {
         }
     }
 
+    /// Creates a new Hex with the given axial coordinates.
     pub(crate) fn new(q: i32, r: i32) -> Self {
         Hex { q, r }
+    }
+
+    /// Returns the q axial coordinate.
+    pub(crate) fn q(&self) -> i32 {
+        self.q
+    }
+
+    /// Returns the r axial coordinate.
+    pub(crate) fn r(&self) -> i32 {
+        self.r
     }
 
     /// Converts axial coordinates to cube coordinates.
@@ -87,7 +101,7 @@ impl Hex {
 
     /// Returns the neighboring hex in the specified direction (0 to 5). See [`Hex::NEIGHBOR_DIR`]
     /// for mapping.
-    fn neighbor(&self, direction: usize) -> Hex {
+    pub(crate) fn neighbor(&self, direction: usize) -> Hex {
         let (dq, dr) = Self::NEIGHBOR_DIR[direction % 6];
         Hex {
             q: self.q + dq,
@@ -96,7 +110,7 @@ impl Hex {
     }
 
     /// Computes the distance between two hexes.
-    fn distance(&self, other: &Hex) -> i32 {
+    pub(crate) fn distance(&self, other: &Hex) -> i32 {
         let (x1, y1, z1) = self.to_cube();
         let (x2, y2, z2) = other.to_cube();
         ((x1 - x2).abs() + (y1 - y2).abs() + (z1 - z2).abs()) / 2

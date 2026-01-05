@@ -8,6 +8,7 @@ mod player;
 use crate::map::{HexMap, MapMode, SelectedProvince};
 use bevy::log::{Level, LogPlugin};
 use bevy::prelude::*;
+use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
 fn main() {
     App::new()
@@ -15,6 +16,7 @@ fn main() {
             level: Level::INFO,
             ..default()
         }))
+        .add_plugins(EguiPlugin::default())
         .insert_resource(HexMap::default())
         .insert_resource(SelectedProvince::default())
         .insert_resource(MapMode::default())
@@ -37,6 +39,8 @@ fn main() {
                 map::render_province_political.run_if(resource_equals(MapMode::Political)),
             ),
         )
+        .add_systems(EguiPrimaryContextPass, map::display_province_panel)
+        .add_systems(EguiPrimaryContextPass, map::display_map_modes_panel)
         .run();
 }
 

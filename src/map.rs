@@ -1,14 +1,17 @@
 ﻿use crate::consts;
-use crate::country::MapColor;
+use crate::country::{MapColor, Name};
 use crate::hex::Hex;
 use bevy::asset::Assets;
 use bevy::color::{Color, Mix};
 use bevy::mesh::{Mesh, Mesh2d};
 use bevy::prelude::{
-    ColorMaterial, Commands, Component, Entity, MeshMaterial2d, Query, RegularPolygon, ResMut,
-    Resource, Transform,
+    ColorMaterial, Commands, Component, Entity, Local, MeshMaterial2d, Query, RegularPolygon,
+    ResMut, Resource, Transform,
 };
+use bevy_egui::egui::Align2;
+use bevy_egui::{egui, EguiContexts};
 use std::collections::HashMap;
+use std::fmt::Display;
 
 #[derive(Resource, Default, PartialEq)]
 pub(crate) enum MapMode {
@@ -105,6 +108,21 @@ enum Terrain {
     Desert,
     Wasteland,
     Sea,
+}
+
+impl Display for Terrain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let terrain_str = match self {
+            Terrain::Plains => "Plains",
+            Terrain::Hills => "Hills",
+            Terrain::Mountains => "Mountains",
+            Terrain::Forest => "Forest",
+            Terrain::Desert => "Desert",
+            Terrain::Wasteland => "Wasteland",
+            Terrain::Sea => "Sea",
+        };
+        write!(f, "{}", terrain_str)
+    }
 }
 
 impl Terrain {
@@ -281,4 +299,90 @@ pub(crate) fn switch_map_mode(map_mode: &mut ResMut<MapMode>) {
         MapMode::Terrain => MapMode::Political,
         MapMode::Political => MapMode::Terrain,
     };
+}
+
+pub(crate) fn display_province_panel(
+    mut contexts: EguiContexts,
+    selected: ResMut<SelectedProvince>,
+    provinces: Query<(&Province, Option<&Owner>)>,
+    countries: Query<&Name>,
+    mut current_tab: Local<ProvinceTab>,
+) {
+    if let Some(selected_province) = selected.get()
+        && let Ok((province, maybe_owner)) = provinces.get(selected_province)
+    {
+        let owner_name = if let Some(owner) = maybe_owner {
+            if let Ok(name) = countries.get(owner.0) {
+                name.0.clone()
+            } else {
+                "Unknown".to_string()
+            }
+        } else {
+            "Unowned".to_string()
+        };
+        if let Ok(ctx) = contexts.ctx_mut() {
+            egui::Window::new("Province Details")
+                .default_size([200f32, 150f32])
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut *current_tab, ProvinceTab::Overview, "Overview");
+                        ui.selectable_value(&mut *current_tab, ProvinceTab::Buildings, "Buildings");
+                    });
+
+                    ui.separator();
+
+                    if *current_tab == ProvinceTab::Buildings {
+                        ui.label("Buildings tab is under construction.");
+                        return;
+                    }
+
+                    ui.label(format!("Name: {}", province.name));
+                    ui.label(format!("Owner: {}", owner_name));
+                    ui.label(format!("Terrain: {}", province.terrain));
+                });
+        }
+    }
+}
+
+pub(crate) fn display_map_modes_panel(mut contexts: EguiContexts, mut map_mode: ResMut<MapMode>) {
+    if let Ok(ctx) = contexts.ctx_mut() {
+        let font_id = egui::FontId::proportional(24.0);
+        egui::Area::new(egui::Id::new("map_modes"))
+            .anchor(Align2::RIGHT_BOTTOM, [0.0, 0.0])
+            .show(ctx, |ui| {
+                if ui
+                    .add_sized(
+                        [50.0, 50.0],
+                        egui::Button::selectable(
+                            *map_mode == MapMode::Terrain,
+                            egui::RichText::new("🌲").font(font_id.clone()),
+                        ),
+                    )
+                    .on_hover_text("Terrain")
+                    .clicked()
+                {
+                    *map_mode = MapMode::Terrain
+                }
+
+                if ui
+                    .add_sized(
+                        [50.0, 50.0],
+                        egui::Button::selectable(
+                            *map_mode == MapMode::Political,
+                            egui::RichText::new("🏁").font(font_id),
+                        ),
+                    )
+                    .on_hover_text("Political")
+                    .clicked()
+                {
+                    *map_mode = MapMode::Political
+                }
+            });
+    }
+}
+#[derive(PartialEq, Default)]
+pub(crate) enum ProvinceTab {
+    #[default]
+    Overview,
+    Buildings,
 }

@@ -11,6 +11,7 @@ use bevy::prelude::{
     Single, Time, Transform, Window, With,
 };
 use bevy::window::PrimaryWindow;
+use bevy_egui::EguiContexts;
 
 /// System to handle keyboard input for moving the camera.
 pub(crate) fn camera_keyboard_system(
@@ -65,12 +66,20 @@ pub(crate) fn camera_zoom_system(
 /// System to handle mouse clicks and select provinces on the hex map.
 pub(crate) fn click_system(
     mut commands: Commands,
+    mut contexts: EguiContexts,
     mouse: Res<ButtonInput<MouseButton>>,
     window: Single<&Window, With<PrimaryWindow>>,
     camera: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
     hex_map: Res<HexMap>,
     mut selected: ResMut<SelectedProvince>,
 ) {
+    // Egui is using the pointer, so we shouldn't process the click.
+    if let Ok(ctx) = contexts.ctx_mut()
+        && ctx.wants_pointer_input()
+    {
+        return;
+    }
+
     if !mouse.just_pressed(MouseButton::Left) {
         return;
     }

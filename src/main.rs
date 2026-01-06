@@ -1,10 +1,12 @@
 mod consts;
 mod country;
+mod egui_common;
 mod hex;
 mod layout;
 mod map;
 mod player;
 
+use crate::country::SelectedCountry;
 use crate::map::{HexMap, MapMode, SelectedProvince};
 use bevy::log::{Level, LogPlugin};
 use bevy::prelude::*;
@@ -19,6 +21,7 @@ fn main() {
         .add_plugins(EguiPlugin::default())
         .insert_resource(HexMap::default())
         .insert_resource(SelectedProvince::default())
+        .insert_resource(SelectedCountry::default())
         .insert_resource(MapMode::default())
         .add_systems(Startup, setup_camera)
         .add_systems(Startup, country::setup_countries)
@@ -41,6 +44,7 @@ fn main() {
         )
         .add_systems(EguiPrimaryContextPass, map::display_province_panel)
         .add_systems(EguiPrimaryContextPass, map::display_map_modes_panel)
+        .add_systems(EguiPrimaryContextPass, country::display_country_panel)
         .run();
 }
 

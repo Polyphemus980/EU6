@@ -19,6 +19,16 @@ pub(crate) struct MapColor(pub(crate) Color);
 #[derive(Component)]
 pub(crate) struct Coffer(pub(crate) f32);
 
+impl Coffer {
+    pub(crate) fn add_ducats(&mut self, ducats: f32) {
+        self.0 += ducats;
+    }
+
+    pub(crate) fn remove_ducats(&mut self, ducats: f32) {
+        self.0 -= ducats;
+    }
+}
+
 #[derive(Resource, Default)]
 pub(crate) struct SelectedCountry {
     selected: Option<Entity>,

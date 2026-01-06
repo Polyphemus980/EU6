@@ -1,3 +1,4 @@
+mod buildings;
 mod consts;
 mod country;
 mod egui_common;
@@ -5,9 +6,11 @@ mod hex;
 mod layout;
 mod map;
 mod player;
+mod turns;
 
 use crate::country::SelectedCountry;
 use crate::map::{HexMap, MapMode, SelectedProvince};
+use crate::turns::{GameState, Turn};
 use bevy::log::{Level, LogPlugin};
 use bevy::prelude::*;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
@@ -23,6 +26,7 @@ fn main() {
         .insert_resource(SelectedProvince::default())
         .insert_resource(SelectedCountry::default())
         .insert_resource(MapMode::default())
+        .insert_resource(Turn::default())
         .add_systems(Startup, setup_camera)
         .add_systems(Startup, country::setup_countries)
         .add_systems(Startup, map::generate_map)
@@ -45,6 +49,9 @@ fn main() {
         .add_systems(EguiPrimaryContextPass, map::display_province_panel)
         .add_systems(EguiPrimaryContextPass, map::display_map_modes_panel)
         .add_systems(EguiPrimaryContextPass, country::display_country_panel)
+        .init_state::<GameState>()
+        .add_systems(OnEnter(GameState::Processing), turns::handle_new_turn)
+        .add_systems(EguiPrimaryContextPass, turns::display_turn_button)
         .run();
 }
 

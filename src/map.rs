@@ -1,4 +1,5 @@
-﻿use crate::country::{DisplayName, MapColor, SelectedCountry};
+﻿use crate::buildings::Income;
+use crate::country::{DisplayName, MapColor, SelectedCountry};
 use crate::hex::Hex;
 use crate::{consts, egui_common};
 use bevy::asset::Assets;
@@ -87,6 +88,10 @@ impl Province {
     pub(crate) fn is_ownable(&self) -> bool {
         !matches!(self.terrain, Terrain::Sea | Terrain::Wasteland)
     }
+
+    pub(crate) fn base_income(&self) -> f32 {
+        self.terrain.base_income()
+    }
 }
 
 const COLOR_PLAINS: Color = Color::srgb(0.46, 0.79, 0.26); // Grass green
@@ -135,6 +140,18 @@ impl Terrain {
             Terrain::Desert => COLOR_DESERT,
             Terrain::Wasteland => COLOR_WASTELAND,
             Terrain::Sea => COLOR_SEA,
+        }
+    }
+
+    const fn base_income(&self) -> f32 {
+        match self {
+            Terrain::Plains => 0.2,
+            Terrain::Hills => 0.16,
+            Terrain::Mountains => 0.1,
+            Terrain::Forest => 0.14,
+            Terrain::Desert => 0.5,
+            Terrain::Wasteland => 0.0,
+            Terrain::Sea => 0.0,
         }
     }
 }
@@ -225,6 +242,7 @@ fn build_province_entity(
     MeshMaterial2d<ColorMaterial>,
     Transform,
     InteractionState,
+    Income,
 ) {
     let mesh = Mesh::from(RegularPolygon::new(size, 6));
     let mesh_handle = meshes.add(mesh);
@@ -235,12 +253,15 @@ fn build_province_entity(
     let hex = province.hex;
     let transform = Transform::from_translation(hex.axial_to_world(size).extend(0.0));
 
+    let income = Income::new(province.base_income());
+
     (
         province,
         Mesh2d(mesh_handle),
         MeshMaterial2d(material_handle),
         transform,
         InteractionState::None,
+        income,
     )
 }
 

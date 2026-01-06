@@ -5,9 +5,10 @@ use crate::{consts, egui_common};
 use bevy::asset::Assets;
 use bevy::color::{Color, Mix};
 use bevy::mesh::{Mesh, Mesh2d};
+use bevy::picking::Pickable;
 use bevy::prelude::{
-    ColorMaterial, Commands, Component, Entity, Local, MeshMaterial2d, Query, RegularPolygon,
-    ResMut, Resource, Transform,
+    Click, ColorMaterial, Commands, Component, Entity, Local, MeshMaterial2d, On, Pointer, Query,
+    RegularPolygon, ResMut, Resource, Transform,
 };
 use bevy_egui::egui::{Align2, Color32, RichText, Stroke};
 use bevy_egui::{egui, EguiContexts};
@@ -223,11 +224,42 @@ pub(crate) fn generate_map(
             let province_entity =
                 build_province_entity(&mut meshes, &mut materials, province, consts::HEX_SIZE);
 
-            let province_id = commands.spawn(province_entity).id();
+            let province_id = commands
+                .spawn(province_entity)
+                .observe(handle_province_click)
+                .id();
 
             hex_map.tiles.insert(hex, province_id);
         }
     }
+}
+
+/// Event handler for when a province is clicked. Manages selection and deselection of provinces.
+fn handle_province_click(
+    click: On<Pointer<Click>>,
+    mut selected: ResMut<SelectedProvince>,
+    mut commands: Commands,
+) {
+    let clicked_entity = click.entity;
+
+    // 1. Deselect the previous entity if it exists
+    if let Some(prev_entity) = selected.get() {
+        // If the user clicks the same hex, just deselect and return
+        if prev_entity == clicked_entity {
+            commands.entity(prev_entity).insert(InteractionState::None);
+            selected.clear();
+            return;
+        }
+
+        // Otherwise, reset the old one before selecting the new one
+        commands.entity(prev_entity).insert(InteractionState::None);
+    }
+
+    // 2. Select the new entity
+    commands
+        .entity(clicked_entity)
+        .insert(InteractionState::Selected);
+    selected.set(clicked_entity);
 }
 
 /// Builds the visual representation of a province as a hex tile.
@@ -243,6 +275,7 @@ fn build_province_entity(
     Transform,
     InteractionState,
     Income,
+    Pickable,
 ) {
     let mesh = Mesh::from(RegularPolygon::new(size, 6));
     let mesh_handle = meshes.add(mesh);
@@ -262,6 +295,7 @@ fn build_province_entity(
         transform,
         InteractionState::None,
         income,
+        Pickable::default(),
     )
 }
 
@@ -323,6 +357,7 @@ pub(crate) fn switch_map_mode(map_mode: &mut ResMut<MapMode>) {
 }
 
 pub(crate) fn display_province_panel(
+    mut commands: Commands,
     mut contexts: EguiContexts,
     mut selected_province: ResMut<SelectedProvince>,
     mut selected_country: ResMut<SelectedCountry>,
@@ -365,6 +400,7 @@ pub(crate) fn display_province_panel(
                 ));
                 ui.add_space(8.0);
                 if egui_common::close_button(ui) {
+                    commands.entity(selected_id).insert(InteractionState::None);
                     selected_province.clear();
                 }
             });
@@ -445,6 +481,8 @@ pub(crate) fn display_province_panel(
             }
         });
 }
+
+/// Egui component for showing and selecting possible map modes (political and terrain).
 pub(crate) fn display_map_modes_panel(mut contexts: EguiContexts, mut map_mode: ResMut<MapMode>) {
     let ctx = match contexts.ctx_mut() {
         Ok(ctx) => ctx,

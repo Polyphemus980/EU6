@@ -22,6 +22,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(EguiPlugin::default())
+        .add_plugins(MeshPickingPlugin)
         .insert_resource(HexMap::default())
         .insert_resource(SelectedProvince::default())
         .insert_resource(SelectedCountry::default())
@@ -38,7 +39,6 @@ fn main() {
         )
         .add_systems(Update, layout::camera_keyboard_system)
         .add_systems(Update, layout::camera_zoom_system)
-        .add_systems(Update, layout::click_system)
         .add_systems(
             Update,
             (

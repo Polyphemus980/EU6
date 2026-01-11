@@ -1,17 +1,24 @@
-﻿use crate::hex::Hex;
-use crate::map::{InteractionState, MapMode, ProvinceHexMap, SelectedProvince};
-use crate::{consts, map};
-use bevy::camera::{Camera, Camera2d, Projection};
+﻿use crate::map;
+use crate::map::{MapMode, ProvinceHexMap, SelectedProvince};
+use bevy::camera::{Camera2d, Projection};
 use bevy::input::mouse::MouseWheel;
 use bevy::input::ButtonInput;
-use bevy::log::{error, info};
+use bevy::log::info;
 use bevy::math::Vec3;
 use bevy::prelude::{
-    Commands, Component, GlobalTransform, KeyCode, MessageReader, MouseButton, Query, Res, ResMut,
-    Single, Time, Transform, Window, With,
+    KeyCode, MessageReader, MouseButton, Plugin, Query, Res, ResMut, Single, Time, Transform,
+    Window, With,
 };
-use bevy::window::PrimaryWindow;
-use bevy_egui::EguiContexts;
+
+pub struct LayoutPlugin;
+
+impl Plugin for LayoutPlugin {
+    fn build(&self, app: &mut bevy::prelude::App) {
+        use bevy::prelude::*;
+        app.add_systems(Update, camera_keyboard_system)
+            .add_systems(Update, camera_zoom_system);
+    }
+}
 
 /// System to handle keyboard input for moving the camera.
 pub(crate) fn camera_keyboard_system(

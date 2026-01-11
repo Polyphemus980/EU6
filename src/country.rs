@@ -2,7 +2,23 @@
 use crate::map::{Owner, Province};
 use bevy::prelude::*;
 use bevy_egui::egui::{Color32, RichText};
-use bevy_egui::{egui, EguiContexts};
+use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
+
+pub struct CountryPlugin;
+
+impl Plugin for CountryPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(SelectedCountry::default())
+            .add_systems(Startup, setup_countries)
+            .add_systems(
+                Startup,
+                assign_province_ownership
+                    .after(crate::map::generate_map)
+                    .after(setup_countries),
+            )
+            .add_systems(EguiPrimaryContextPass, display_country_panel);
+    }
+}
 
 /// Marker component for country entities. No data as I am trying to do ECS :P.
 #[derive(Component)]

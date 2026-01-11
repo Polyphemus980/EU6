@@ -13,9 +13,30 @@ use bevy::prelude::{
 };
 use bevy::prelude::{Res, Result};
 use bevy_egui::egui::{Align2, Color32, RichText, Stroke};
-use bevy_egui::{egui, EguiContexts};
+use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use std::collections::HashMap;
 use std::fmt::Display;
+
+pub struct MapPlugin;
+
+impl bevy::prelude::Plugin for MapPlugin {
+    fn build(&self, app: &mut bevy::prelude::App) {
+        use bevy::prelude::*;
+        app.insert_resource(ProvinceHexMap::default())
+            .insert_resource(SelectedProvince::default())
+            .insert_resource(MapMode::default())
+            .add_systems(Startup, generate_map)
+            .add_systems(
+                Update,
+                (
+                    render_province_terrain.run_if(resource_equals(MapMode::Terrain)),
+                    render_province_political.run_if(resource_equals(MapMode::Political)),
+                ),
+            )
+            .add_systems(EguiPrimaryContextPass, display_province_panel)
+            .add_systems(EguiPrimaryContextPass, display_map_modes_panel);
+    }
+}
 
 #[derive(Resource, Default, PartialEq)]
 pub(crate) enum MapMode {
@@ -57,7 +78,7 @@ impl SelectedProvince {
     }
 }
 
-/// Component indicating that a entity is currently selected.
+/// Component indicating that an entity is currently selected.
 #[derive(Component, Default, PartialEq, Copy, Clone)]
 pub(crate) enum InteractionState {
     #[default]

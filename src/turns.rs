@@ -2,10 +2,22 @@
 use crate::country::{Coffer, Country};
 use crate::map::{Owner, Province};
 use bevy::log::info;
-use bevy::prelude::{NextState, Query, Res, ResMut, Resource, State, States, With};
+use bevy::prelude::{NextState, Plugin, Query, Res, ResMut, Resource, State, States, With};
 use bevy_egui::egui::Align2;
-use bevy_egui::{egui, EguiContexts};
+use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use std::collections::HashMap;
+
+pub struct TurnsPlugin;
+
+impl Plugin for TurnsPlugin {
+    fn build(&self, app: &mut bevy::prelude::App) {
+        use bevy::prelude::*;
+        app.insert_resource(Turn::default())
+            .init_state::<GameState>()
+            .add_systems(OnEnter(GameState::Processing), handle_new_turn)
+            .add_systems(EguiPrimaryContextPass, display_turn_button);
+    }
+}
 
 /// Resource for keeping track of current turn. Only cosmetic for now (or forever?).
 #[derive(Resource, Default)]

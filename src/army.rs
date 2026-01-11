@@ -8,6 +8,23 @@ use bevy::prelude::*;
 use bevy::sprite::Sprite;
 use std::collections::HashMap;
 
+pub struct ArmyPlugin;
+
+impl Plugin for ArmyPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(ArmyHexMap::default())
+            .insert_resource(SelectedArmy::default())
+            .add_message::<MoveArmyEvent>()
+            .add_systems(
+                Startup,
+                spawn_initial_armies.after(crate::country::assign_province_ownership),
+            )
+            .add_systems(Update, army_movement_system)
+            .add_systems(Update, handle_army_interaction_changed)
+            .add_systems(Update, handle_army_composition_changed);
+    }
+}
+
 /// Resource mapping hex positions to army entities. One army per hex - stacking = auto-merge.
 #[derive(Resource, Default)]
 pub(crate) struct ArmyHexMap {

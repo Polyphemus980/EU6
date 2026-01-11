@@ -26,13 +26,7 @@ impl bevy::prelude::Plugin for MapPlugin {
             .insert_resource(SelectedProvince::default())
             .insert_resource(MapMode::default())
             .add_systems(Startup, generate_map)
-            .add_systems(
-                Update,
-                (
-                    render_province_terrain.run_if(resource_equals(MapMode::Terrain)),
-                    render_province_political.run_if(resource_equals(MapMode::Political)),
-                ),
-            )
+            .add_systems(Update, update_province_colors)
             .add_systems(EguiPrimaryContextPass, display_province_panel)
             .add_systems(EguiPrimaryContextPass, display_map_modes_panel);
     }
@@ -341,28 +335,10 @@ fn build_province_entity(
     )
 }
 
-/// System to update province visuals based on if the province is selected or not. Uses
-/// province's terrain color.
-pub(crate) fn render_province_terrain(
+/// System to update province visuals based on map mode and selection state.
+pub(crate) fn update_province_colors(
     mut materials: ResMut<Assets<ColorMaterial>>,
-    query: Query<(&Province, &MeshMaterial2d<ColorMaterial>, &InteractionState)>,
-) {
-    for (province, material, state) in &query {
-        if let Some(mat) = materials.get_mut(&material.0) {
-            let base_color = province.color();
-
-            mat.color = match *state {
-                InteractionState::Selected => base_color.mix(&Color::srgb(1.0, 0.9, 0.0), 0.4),
-                InteractionState::None => base_color,
-            };
-        }
-    }
-}
-
-/// System to update province visuals based on if the province is selected or not. Uses
-/// province's owner color
-pub(crate) fn render_province_political(
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    map_mode: Res<MapMode>,
     query: Query<(
         &Province,
         Option<&Owner>,
@@ -371,20 +347,26 @@ pub(crate) fn render_province_political(
     )>,
     country_query: Query<&MapColor>,
 ) {
-    for (province, maybe_owner, material, state) in query {
+    let selection_mix = 0.4;
+    let selection_color = Color::srgb(1.0, 0.9, 0.0);
+
+    for (province, maybe_owner, material, state) in &query {
         if let Some(mat) = materials.get_mut(&material.0) {
-            let base_color = if let Some(owner) = maybe_owner {
-                if let Ok(map_color) = country_query.get(owner.0) {
-                    map_color.0
-                } else {
-                    province.color()
+            let base_color = match *map_mode {
+                MapMode::Terrain => province.color(),
+                MapMode::Political => {
+                    if let Some(owner) = maybe_owner
+                        && let Ok(map_color) = country_query.get(owner.0)
+                    {
+                        map_color.0
+                    } else {
+                        province.color()
+                    }
                 }
-            } else {
-                province.color()
             };
 
             mat.color = match *state {
-                InteractionState::Selected => base_color.mix(&Color::srgb(1.0, 0.9, 0.0), 0.4),
+                InteractionState::Selected => base_color.mix(&selection_color, selection_mix),
                 InteractionState::None => base_color,
             };
         }

@@ -1,13 +1,12 @@
 ﻿use crate::map;
-use crate::map::{MapMode, ProvinceHexMap, SelectedProvince};
+use crate::map::MapMode;
 use bevy::camera::{Camera2d, Projection};
 use bevy::input::mouse::MouseWheel;
 use bevy::input::ButtonInput;
 use bevy::log::info;
 use bevy::math::Vec3;
 use bevy::prelude::{
-    KeyCode, MessageReader, MouseButton, Plugin, Query, Res, ResMut, Single, Time, Transform,
-    Window, With,
+    KeyCode, MessageReader, Plugin, Query, Res, ResMut, Single, Time, Transform, With,
 };
 
 pub struct LayoutPlugin;

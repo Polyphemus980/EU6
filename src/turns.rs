@@ -1,8 +1,8 @@
 ﻿use crate::buildings::Income;
-use crate::country::{Coffer, Country};
-use crate::map::{Owner, Province};
+use crate::country::Coffer;
+use crate::map::Owner;
 use bevy::log::info;
-use bevy::prelude::{NextState, Plugin, Query, Res, ResMut, Resource, State, States, With};
+use bevy::prelude::{NextState, Plugin, Query, Res, ResMut, Resource, State, States};
 use bevy_egui::egui::Align2;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use std::collections::HashMap;
@@ -46,7 +46,7 @@ pub(crate) fn handle_new_turn(
     mut turn: ResMut<Turn>,
     mut next_state: ResMut<NextState<GameState>>,
     incomes: Query<(&Income, &Owner)>,
-    mut coffers: Query<(&mut Coffer)>,
+    mut coffers: Query<&mut Coffer>,
 ) {
     info!("Ending turn {}", turn.current_turn);
 

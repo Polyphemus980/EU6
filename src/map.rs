@@ -1,4 +1,5 @@
-﻿use crate::buildings::Income;
+﻿use crate::army::{HexPos, MoveArmyEvent, SelectedArmy};
+use crate::buildings::Income;
 use crate::country::{DisplayName, MapColor, SelectedCountry};
 use crate::hex::Hex;
 use crate::{consts, egui_common};
@@ -7,9 +8,10 @@ use bevy::color::{Color, Mix};
 use bevy::mesh::{Mesh, Mesh2d};
 use bevy::picking::Pickable;
 use bevy::prelude::{
-    Click, ColorMaterial, Commands, Component, Entity, Local, MeshMaterial2d, On, Pointer, Query,
-    RegularPolygon, ResMut, Resource, Transform,
+    Click, ColorMaterial, Commands, Component, Entity, Local, MeshMaterial2d, MessageWriter, On,
+    Pointer, PointerButton, Query, RegularPolygon, ResMut, Resource, Transform,
 };
+use bevy::prelude::{Res, Result};
 use bevy_egui::egui::{Align2, Color32, RichText, Stroke};
 use bevy_egui::{egui, EguiContexts};
 use std::collections::HashMap;
@@ -25,11 +27,11 @@ pub(crate) enum MapMode {
 /// Resource mapping hex coordinates to province entities. Allows clicking on hex tiles to find
 /// the corresponding province.
 #[derive(Resource, Default)]
-pub(crate) struct HexMap {
+pub(crate) struct ProvinceHexMap {
     tiles: HashMap<Hex, Entity>,
 }
 
-impl HexMap {
+impl ProvinceHexMap {
     pub(crate) fn get_entity(&self, hex: &Hex) -> Option<&Entity> {
         self.tiles.get(hex)
     }
@@ -55,7 +57,7 @@ impl SelectedProvince {
     }
 }
 
-/// Component indicating that a province is currently selected.
+/// Component indicating that a entity is currently selected.
 #[derive(Component, Default, PartialEq, Copy, Clone)]
 pub(crate) enum InteractionState {
     #[default]
@@ -63,7 +65,7 @@ pub(crate) enum InteractionState {
     Selected,
 }
 
-#[derive(Component)]
+#[derive(Component, PartialEq)]
 pub(crate) struct Owner(pub(crate) Entity);
 
 /// Component representing a province on the map.
@@ -89,7 +91,9 @@ impl Province {
     pub(crate) fn is_ownable(&self) -> bool {
         !matches!(self.terrain, Terrain::Sea | Terrain::Wasteland)
     }
-
+    pub(crate) fn is_passable(&self) -> bool {
+        !matches!(self.terrain, Terrain::Sea | Terrain::Wasteland)
+    }
     pub(crate) fn base_income(&self) -> f32 {
         self.terrain.base_income()
     }
@@ -174,7 +178,7 @@ impl From<u8> for Terrain {
 /// System to generate a hex map of provinces at startup.
 pub(crate) fn generate_map(
     mut commands: Commands,
-    mut hex_map: ResMut<HexMap>,
+    mut hex_map: ResMut<ProvinceHexMap>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
@@ -237,18 +241,33 @@ pub(crate) fn generate_map(
 /// Event handler for when a province is clicked. Manages selection and deselection of provinces.
 fn handle_province_click(
     click: On<Pointer<Click>>,
-    mut selected: ResMut<SelectedProvince>,
+    mut selected_province: ResMut<SelectedProvince>,
+    selected_army: Res<SelectedArmy>,
+    mut army_event_messenger: MessageWriter<MoveArmyEvent>,
     mut commands: Commands,
-) {
+    province: Query<&Province>,
+) -> Result {
     let clicked_entity = click.entity;
 
+    if let Some(army) = selected_army.get()
+        && click.button == PointerButton::Secondary
+    {
+        let province_pos = province.get(clicked_entity).map(|p| p.get_hex())?;
+        army_event_messenger.write(MoveArmyEvent::new(army, HexPos::new(*province_pos)));
+        return Ok(());
+    }
+
+    if click.button != PointerButton::Primary {
+        return Ok(());
+    }
+
     // 1. Deselect the previous entity if it exists
-    if let Some(prev_entity) = selected.get() {
+    if let Some(prev_entity) = selected_province.get() {
         // If the user clicks the same hex, just deselect and return
         if prev_entity == clicked_entity {
             commands.entity(prev_entity).insert(InteractionState::None);
-            selected.clear();
-            return;
+            selected_province.clear();
+            return Ok(());
         }
 
         // Otherwise, reset the old one before selecting the new one
@@ -259,7 +278,9 @@ fn handle_province_click(
     commands
         .entity(clicked_entity)
         .insert(InteractionState::Selected);
-    selected.set(clicked_entity);
+    selected_province.set(clicked_entity);
+
+    Ok(())
 }
 
 /// Builds the visual representation of a province as a hex tile.

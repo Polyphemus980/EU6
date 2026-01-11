@@ -1,5 +1,5 @@
 ﻿use crate::hex::Hex;
-use crate::map::{HexMap, InteractionState, MapMode, SelectedProvince};
+use crate::map::{InteractionState, MapMode, ProvinceHexMap, SelectedProvince};
 use crate::{consts, map};
 use bevy::camera::{Camera, Camera2d, Projection};
 use bevy::input::mouse::MouseWheel;

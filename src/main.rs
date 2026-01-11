@@ -1,3 +1,4 @@
+mod army;
 mod buildings;
 mod consts;
 mod country;
@@ -8,8 +9,9 @@ mod map;
 mod player;
 mod turns;
 
+use crate::army::{ArmyHexMap, MoveArmyEvent, SelectedArmy};
 use crate::country::SelectedCountry;
-use crate::map::{HexMap, MapMode, SelectedProvince};
+use crate::map::{MapMode, ProvinceHexMap, SelectedProvince};
 use crate::turns::{GameState, Turn};
 use bevy::log::{Level, LogPlugin};
 use bevy::prelude::*;
@@ -23,11 +25,14 @@ fn main() {
         }))
         .add_plugins(EguiPlugin::default())
         .add_plugins(MeshPickingPlugin)
-        .insert_resource(HexMap::default())
+        .insert_resource(ProvinceHexMap::default())
+        .insert_resource(ArmyHexMap::default())
         .insert_resource(SelectedProvince::default())
         .insert_resource(SelectedCountry::default())
+        .insert_resource(SelectedArmy::default())
         .insert_resource(MapMode::default())
         .insert_resource(Turn::default())
+        .add_message::<MoveArmyEvent>()
         .add_systems(Startup, setup_camera)
         .add_systems(Startup, country::setup_countries)
         .add_systems(Startup, map::generate_map)
@@ -36,6 +41,10 @@ fn main() {
             country::assign_province_ownership
                 .after(map::generate_map)
                 .after(country::setup_countries),
+        )
+        .add_systems(
+            Startup,
+            army::spawn_initial_armies.after(country::assign_province_ownership),
         )
         .add_systems(Update, layout::camera_keyboard_system)
         .add_systems(Update, layout::camera_zoom_system)
@@ -52,6 +61,9 @@ fn main() {
         .init_state::<GameState>()
         .add_systems(OnEnter(GameState::Processing), turns::handle_new_turn)
         .add_systems(EguiPrimaryContextPass, turns::display_turn_button)
+        .add_systems(Update, army::army_movement_system)
+        .add_systems(Update, army::handle_army_interaction_changed)
+        .add_systems(Update, army::handle_army_composition_changed)
         .run();
 }
 

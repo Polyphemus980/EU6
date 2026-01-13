@@ -130,10 +130,6 @@ pub(crate) fn army_movement_system(
     mut army_hex_map: ResMut<ArmyHexMap>,
     mut armies_query: Query<(&Owner, &mut ArmyComposition), With<Army>>,
 ) -> Result {
-    println!("Processing army movement events...");
-    army_hex_map.tiles.iter().for_each(|(pos, army)| {
-        println!("Army at position: {:?} -> {:?}", pos.0, army);
-    });
     for event in move_events.read() {
         let from_pos = army_hex_map
             .tiles

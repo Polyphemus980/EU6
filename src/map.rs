@@ -267,8 +267,12 @@ fn handle_province_click(
     if let Some(army) = selected_army.get()
         && click.button == PointerButton::Secondary
     {
-        let province_pos = province.get(clicked_entity).map(|p| p.get_hex())?;
-        army_event_messenger.write(MoveArmyEvent::new(army, HexPos::new(*province_pos)));
+        let province = province.get(clicked_entity)?;
+        if !province.is_passable() {
+            return Ok(());
+        }
+
+        army_event_messenger.write(MoveArmyEvent::new(army, HexPos::new(*province.get_hex())));
         return Ok(());
     }
 

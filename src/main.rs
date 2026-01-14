@@ -13,6 +13,7 @@ use crate::army::ArmyPlugin;
 use crate::country::CountryPlugin;
 use crate::layout::LayoutPlugin;
 use crate::map::MapPlugin;
+use crate::player::PlayerPlugin;
 use crate::turns::TurnsPlugin;
 use bevy::log::{Level, LogPlugin};
 use bevy::prelude::*;
@@ -32,6 +33,7 @@ fn main() {
             ArmyPlugin,
             LayoutPlugin,
             TurnsPlugin,
+            PlayerPlugin,
         ))
         .add_systems(Startup, setup_camera)
         .run();

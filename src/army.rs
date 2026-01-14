@@ -2,6 +2,7 @@
 use crate::country::{Country, MapColor};
 use crate::hex::Hex;
 use crate::map::{InteractionState, Owner, Province};
+use crate::player::Player;
 use bevy::ecs::error::Result;
 use bevy::mesh::Mesh;
 use bevy::prelude::*;
@@ -277,13 +278,20 @@ fn handle_army_click(
     click: On<Pointer<Click>>,
     mut selected: ResMut<SelectedArmy>,
     mut commands: Commands,
+    player: Res<Player>,
+    owners: Query<&Owner>,
 ) {
     info!("Army clicked: {:?}", click.entity);
     let clicked_entity = click.entity;
 
-    // 1. Deselect the previous entity if it exists
+    if let Ok(owner) = owners.get(clicked_entity)
+        && Some(owner.0) != player.country
+    {
+        info!("Cannot select army of another country");
+        return;
+    }
+
     if let Some(prev_entity) = selected.get() {
-        // If the user clicks the same army again, just deselect it
         if prev_entity == clicked_entity {
             commands.entity(prev_entity).insert(InteractionState::None);
             selected.clear();

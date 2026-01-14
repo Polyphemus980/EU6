@@ -1,5 +1,6 @@
 ﻿use crate::egui_common;
 use crate::map::{Owner, Province};
+use crate::player::Player;
 use bevy::prelude::*;
 use bevy_egui::egui::{Color32, RichText};
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
@@ -172,6 +173,7 @@ pub(crate) fn display_country_panel(
     mut contexts: EguiContexts,
     mut selected_country: ResMut<SelectedCountry>,
     countries: Query<(&DisplayName, &Coffer, &MapColor), With<Country>>,
+    player: Res<Player>,
 ) {
     let country = match selected_country.get() {
         Some(entity) => entity,
@@ -179,6 +181,8 @@ pub(crate) fn display_country_panel(
     };
 
     if let Ok((name, coffer, color)) = countries.get(country) {
+        let is_player = Some(country) == player.country;
+
         let ctx = match contexts.ctx_mut() {
             Ok(c) => c,
             Err(_) => return,
@@ -200,6 +204,13 @@ pub(crate) fn display_country_panel(
                             .color(Color32::WHITE)
                             .strong(),
                     ));
+
+                    if is_player {
+                        ui.add(egui::Label::new(
+                            RichText::new("(You)").color(Color32::GREEN).italics(),
+                        ));
+                    }
+
                     ui.add_space(8.0);
 
                     if egui_common::close_button(ui) {

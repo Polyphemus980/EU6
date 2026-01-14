@@ -2,6 +2,7 @@
 use crate::buildings::{Building, BuildingType, Income};
 use crate::country::{Coffer, DisplayName, MapColor, SelectedCountry};
 use crate::hex::Hex;
+use crate::player::Player;
 use crate::{consts, egui_common};
 use bevy::asset::Assets;
 use bevy::color::{Color, Mix};
@@ -394,6 +395,7 @@ pub(crate) fn display_province_panel(
     buildings: Query<&Building>,
     mut coffers: Query<&mut Coffer>,
     mut current_tab: Local<ProvinceTab>,
+    player: Res<Player>,
 ) {
     let Some(selected_id) = selected_province.get() else {
         return;
@@ -406,6 +408,10 @@ pub(crate) fn display_province_panel(
         .and_then(|owner| countries.get(owner.0).ok())
         .map(|name| name.0.clone())
         .unwrap_or_else(|| "Unowned".to_string());
+
+    let is_player_owned = maybe_owner
+        .map(|o| Some(o.0) == player.country)
+        .unwrap_or(false);
 
     let ctx = match contexts.ctx_mut() {
         Ok(c) => c,
@@ -506,6 +512,7 @@ pub(crate) fn display_province_panel(
                     for building_type in BuildingType::all_types() {
                         let already_built = existing_buildings.contains(&building_type);
                         let can_afford = available_ducats >= building_type.cost();
+                        let enabled = !already_built && can_afford && is_player_owned;
 
                         ui.horizontal(|ui| {
                             let button_text = if already_built {
@@ -518,13 +525,13 @@ pub(crate) fn display_province_panel(
                                 egui::Button::new(button_text).min_size(egui::vec2(200.0, 0.0));
                             let button = if already_built {
                                 button.fill(Color32::from_rgb(60, 80, 120))
-                            } else if !can_afford {
+                            } else if !enabled {
                                 button.fill(Color32::from_rgb(80, 60, 60))
                             } else {
                                 button.fill(Color32::from_rgb(70, 70, 90))
                             };
 
-                            let response = ui.add_enabled(!already_built && can_afford, button);
+                            let response = ui.add_enabled(enabled, button);
 
                             if response.clicked()
                                 && let Some(owner) = maybe_owner

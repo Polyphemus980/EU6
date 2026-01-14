@@ -43,6 +43,10 @@ impl Coffer {
     pub(crate) fn remove_ducats(&mut self, ducats: f32) {
         self.0 -= ducats;
     }
+
+    pub(crate) fn get_ducats(&self) -> f32 {
+        self.0
+    }
 }
 
 #[derive(Resource, Default)]
@@ -89,7 +93,6 @@ pub fn spawn_country(commands: &mut Commands, name: &str, color: Color) -> Entit
 
 /// Setup function for countries.
 pub(crate) fn setup_countries(mut commands: Commands) {
-    // Create some sample countries with distinct colors
     spawn_country(&mut commands, "Francia", Color::srgb(0.2, 0.3, 0.8)); // Blue
     spawn_country(&mut commands, "Hispania", Color::srgb(0.9, 0.8, 0.1)); // Yellow
     spawn_country(&mut commands, "Germania", Color::srgb(0.3, 0.3, 0.3)); // Gray

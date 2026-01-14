@@ -1,6 +1,6 @@
 ﻿use crate::army::{HexPos, MoveArmyEvent, SelectedArmy};
-use crate::buildings::Income;
-use crate::country::{DisplayName, MapColor, SelectedCountry};
+use crate::buildings::{Building, BuildingType, Income};
+use crate::country::{Coffer, DisplayName, MapColor, SelectedCountry};
 use crate::hex::Hex;
 use crate::{consts, egui_common};
 use bevy::asset::Assets;
@@ -8,13 +8,13 @@ use bevy::color::{Color, Mix};
 use bevy::mesh::{Mesh, Mesh2d};
 use bevy::picking::Pickable;
 use bevy::prelude::{
-    Click, ColorMaterial, Commands, Component, Entity, Local, MeshMaterial2d, MessageWriter, On,
-    Pointer, PointerButton, Query, RegularPolygon, ResMut, Resource, Transform,
+    Children, Click, ColorMaterial, Commands, Component, Entity, Local, MeshMaterial2d,
+    MessageWriter, On, Pointer, PointerButton, Query, RegularPolygon, ResMut, Resource, Transform,
 };
 use bevy::prelude::{Res, Result};
 use bevy_egui::egui::{Align2, Color32, RichText, Stroke};
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 
 pub struct MapPlugin;
@@ -389,14 +389,16 @@ pub(crate) fn display_province_panel(
     mut contexts: EguiContexts,
     mut selected_province: ResMut<SelectedProvince>,
     mut selected_country: ResMut<SelectedCountry>,
-    provinces: Query<(&Province, Option<&Owner>)>,
+    provinces: Query<(&Province, Option<&Owner>, Option<&Children>)>,
     countries: Query<&DisplayName>,
+    buildings: Query<&Building>,
+    mut coffers: Query<&mut Coffer>,
     mut current_tab: Local<ProvinceTab>,
 ) {
     let Some(selected_id) = selected_province.get() else {
         return;
     };
-    let Ok((province, maybe_owner)) = provinces.get(selected_id) else {
+    let Ok((province, maybe_owner, maybe_children)) = provinces.get(selected_id) else {
         return;
     };
 
@@ -474,11 +476,77 @@ pub(crate) fn display_province_panel(
 
             match *current_tab {
                 ProvinceTab::Buildings => {
-                    ui.label(
-                        RichText::new("Buildings tab is under construction.")
-                            .italics()
-                            .weak(),
-                    );
+                    let existing_buildings: HashSet<BuildingType> =
+                        if let Some(children) = maybe_children {
+                            children
+                                .iter()
+                                .filter_map(|&child_id| buildings.get(child_id).ok())
+                                .map(|building| building.building_type)
+                                .collect()
+                        } else {
+                            HashSet::new()
+                        };
+
+                    let available_ducats = maybe_owner
+                        .and_then(|owner| coffers.get(owner.0).ok())
+                        .map(|coffer| coffer.get_ducats())
+                        .unwrap_or(0.0);
+
+                    ui.heading(RichText::new("Buildings").size(16.0));
+                    ui.add_space(4.0);
+                    ui.label(format!("Available ducats: {:.0}💰", available_ducats));
+                    ui.separator();
+                    ui.add_space(8.0);
+
+                    if maybe_owner.is_none() {
+                        ui.label(RichText::new("This province has no owner").italics().weak());
+                        return;
+                    }
+
+                    for building_type in BuildingType::all_types() {
+                        let already_built = existing_buildings.contains(&building_type);
+                        let can_afford = available_ducats >= building_type.cost();
+
+                        ui.horizontal(|ui| {
+                            let button_text = if already_built {
+                                format!("✓ {}", building_type.name())
+                            } else {
+                                format!("{} ({:.0}💰)", building_type.name(), building_type.cost())
+                            };
+
+                            let button =
+                                egui::Button::new(button_text).min_size(egui::vec2(200.0, 0.0));
+                            let button = if already_built {
+                                button.fill(Color32::from_rgb(60, 80, 120))
+                            } else if !can_afford {
+                                button.fill(Color32::from_rgb(80, 60, 60))
+                            } else {
+                                button.fill(Color32::from_rgb(70, 70, 90))
+                            };
+
+                            let response = ui.add_enabled(!already_built && can_afford, button);
+
+                            if response.clicked()
+                                && let Some(owner) = maybe_owner
+                                && let Ok(mut coffer) = coffers.get_mut(owner.0)
+                            {
+                                coffer.remove_ducats(building_type.cost());
+                                commands.entity(selected_id).with_children(|parent| {
+                                    parent.spawn((
+                                        Building { building_type },
+                                        Income::new(building_type.income_bonus()),
+                                        Owner(owner.0),
+                                    ));
+                                });
+                            }
+
+                            if response.hovered() {
+                                response.on_hover_text(building_type.description());
+                            }
+                        });
+
+                        ui.add_space(5.0);
+                    }
                 }
                 ProvinceTab::Overview => {
                     egui::Grid::new("province_stats")

@@ -15,6 +15,10 @@ impl Plugin for TurnsPlugin {
         app.insert_resource(Turn::default())
             .init_state::<GameState>()
             .add_systems(OnEnter(GameState::Processing), handle_new_turn)
+            .add_systems(
+                OnEnter(GameState::Processing),
+                crate::army::move_active_armies,
+            )
             .add_systems(EguiPrimaryContextPass, display_turn_button);
     }
 }

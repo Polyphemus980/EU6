@@ -109,6 +109,10 @@ impl Hex {
         }
     }
 
+    pub(crate) fn neighbors(&self) -> Vec<Hex> {
+        (0..6).map(|dir| self.neighbor(dir)).collect()
+    }
+
     /// Computes the distance between two hexes.
     pub(crate) fn distance(&self, other: &Hex) -> i32 {
         let (x1, y1, z1) = self.to_cube();

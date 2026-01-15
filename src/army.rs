@@ -1,13 +1,14 @@
 ﻿use crate::consts;
 use crate::country::{Country, MapColor};
 use crate::hex::Hex;
-use crate::map::{InteractionState, Owner, Province};
+use crate::map::{InteractionState, Owner, Province, ProvinceHexMap};
 use crate::player::Player;
 use bevy::ecs::error::Result;
 use bevy::mesh::Mesh;
 use bevy::prelude::*;
 use bevy::sprite::Sprite;
-use std::collections::HashMap;
+use pathfinding::prelude::bfs;
+use std::collections::{HashMap, VecDeque};
 
 pub struct ArmyPlugin;
 
@@ -21,6 +22,7 @@ impl Plugin for ArmyPlugin {
                 spawn_initial_armies.after(crate::country::assign_province_ownership),
             )
             .add_systems(Update, army_movement_system)
+            .add_systems(Update, draw_path_gizmos) // Add this for visualization
             .add_systems(Update, handle_army_interaction_changed)
             .add_systems(Update, handle_army_composition_changed);
     }
@@ -66,8 +68,13 @@ impl SelectedArmy {
 }
 
 #[derive(Component)]
+pub(crate) struct ActivePath {
+    pub(crate) path: VecDeque<Hex>,
+}
+
+#[derive(Component)]
 pub(crate) struct Army {}
-#[derive(Component, Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Component, Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub(crate) struct HexPos(pub(crate) Hex);
 
 impl HexPos {
@@ -128,8 +135,9 @@ impl MoveArmyEvent {
 pub(crate) fn army_movement_system(
     mut commands: Commands,
     mut move_events: MessageReader<MoveArmyEvent>,
-    mut army_hex_map: ResMut<ArmyHexMap>,
-    mut armies_query: Query<(&Owner, &mut ArmyComposition), With<Army>>,
+    army_hex_map: ResMut<ArmyHexMap>,
+    province_map: Res<ProvinceHexMap>,
+    provinces: Query<&Province>,
 ) -> Result {
     for event in move_events.read() {
         let from_pos = army_hex_map
@@ -152,34 +160,151 @@ pub(crate) fn army_movement_system(
             continue;
         }
 
-        if let Some(army_entity) = army_hex_map.get(&event.to) {
-            let [moving_army, in_place_army] =
-                armies_query.get_many_mut([event.army, *army_entity])?;
+        // Calculate path
+        let path = bfs(
+            &from_pos.0,
+            |p| {
+                p.neighbors().into_iter().filter(|n| {
+                    if let Some(&entity) = province_map.get_entity(n) {
+                        if let Ok(province) = provinces.get(entity) {
+                            return province.is_passable();
+                        }
+                    }
+                    false
+                })
+            },
+            |p| *p == event.to.0,
+        );
 
-            let (moving_owner, moving_composition) = moving_army;
-            let (in_place_owner, mut in_place_composition) = in_place_army;
-
-            // Merge armies if they have same owner.
-            if moving_owner == in_place_owner {
-                in_place_composition.add(&moving_composition);
-                army_hex_map.remove(&from_pos);
-                commands.entity(event.army).despawn();
-                continue;
+        if let Some(path) = path {
+            let mut deck = VecDeque::from(path);
+            deck.pop_front(); // Remove current position
+            if !deck.is_empty() {
+                commands
+                    .entity(event.army)
+                    .insert(ActivePath { path: deck });
+                info!("Army {:?} started moving to {:?}", event.army, event.to);
             }
-
-            // Simulate combat somehow (TBD).
         } else {
-            army_hex_map.remove(&from_pos);
-            army_hex_map.insert(event.to, event.army);
-
-            let new_pos = event.to.0.axial_to_world(consts::HEX_SIZE);
-            commands
-                .entity(event.army)
-                .insert(Transform::from_translation(new_pos.extend(5.0)));
+            info!("No path found for army {:?} to {:?}", event.army, event.to);
         }
     }
     Ok(())
 }
+
+pub(crate) fn move_active_armies(
+    mut commands: Commands,
+    mut army_hex_map: ResMut<ArmyHexMap>,
+    mut armies_query: Query<
+        (
+            Entity,
+            &mut Transform,
+            &Owner,
+            &mut ArmyComposition,
+            &mut HexPos,
+            Option<&mut ActivePath>,
+        ),
+        With<Army>,
+    >,
+) {
+    let movers: Vec<Entity> = armies_query
+        .iter()
+        .filter_map(|(e, _, _, _, _, path)| if path.is_some() { Some(e) } else { None })
+        .collect();
+
+    for entity in movers {
+        let (next_hex, old_pos) = {
+            if let Ok((_, _, _, _, pos, Some(active_path))) = armies_query.get(entity) {
+                if let Some(h) = active_path.path.front() {
+                    (*h, *pos)
+                } else {
+                    commands.entity(entity).remove::<ActivePath>();
+                    continue;
+                }
+            } else {
+                continue;
+            }
+        };
+
+        let next_pos = HexPos(next_hex);
+
+        if let Some(&occupant_entity) = army_hex_map.get(&next_pos) {
+            if let Ok(
+                [
+                    (e1, _, owner1, comp1, _, _),
+                    (e2, _, owner2, mut comp2, _, _),
+                ],
+            ) = armies_query.get_many_mut([entity, occupant_entity])
+            {
+                if owner1.0 == owner2.0 {
+                    info!("Merging army {:?} into {:?}", e1, e2);
+                    comp2.add(&comp1);
+
+                    army_hex_map.remove(&old_pos);
+                    commands.entity(e1).despawn();
+
+                    continue;
+                } else {
+                    continue;
+                }
+            } else {
+                warn!("Could not retrieve both armies for collision resolution");
+                continue;
+            }
+        }
+
+        if let Ok((_, mut transform, _, _, mut pos, Some(mut active_path))) =
+            armies_query.get_mut(entity)
+        {
+            active_path.path.pop_front();
+
+            army_hex_map.remove(&old_pos);
+            army_hex_map.insert(next_pos, entity);
+            *pos = next_pos;
+            transform.translation = next_hex.axial_to_world(consts::HEX_SIZE).extend(5.0);
+
+            if active_path.path.is_empty() {
+                commands.entity(entity).remove::<ActivePath>();
+                info!("Army {:?} arrived at destination {:?}", entity, next_pos);
+            }
+        }
+    }
+}
+
+fn draw_path_gizmos(
+    mut gizmos: Gizmos,
+    selected_army: Res<SelectedArmy>,
+    armies: Query<&ActivePath>,
+    armies_pos: Query<&HexPos>,
+) {
+    if let Some(entity) = selected_army.get()
+        && let Ok(path) = armies.get(entity)
+    {
+        let mut points = Vec::new();
+        // Start from current position
+        if let Ok(start_pos) = armies_pos.get(entity) {
+            points.push(start_pos.0.axial_to_world(consts::HEX_SIZE));
+        }
+
+        for hex in &path.path {
+            points.push(hex.axial_to_world(consts::HEX_SIZE));
+        }
+
+        if points.len() >= 2 {
+            gizmos.linestrip_2d(points, Color::srgb(1.0, 1.0, 0.0));
+        }
+
+        // Draw waypoints
+        for hex in &path.path {
+            gizmos.circle_2d(
+                hex.axial_to_world(consts::HEX_SIZE),
+                5.0,
+                Color::srgb(1.0, 1.0, 0.0),
+            );
+        }
+    }
+}
+
 pub(crate) fn spawn_army(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -281,6 +406,10 @@ fn handle_army_click(
     player: Res<Player>,
     owners: Query<&Owner>,
 ) {
+    if click.button != PointerButton::Primary {
+        return;
+    }
+
     info!("Army clicked: {:?}", click.entity);
     let clicked_entity = click.entity;
 

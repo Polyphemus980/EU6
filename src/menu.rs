@@ -1,5 +1,6 @@
 ﻿use crate::country::{Country, DisplayName, MapColor};
 use crate::player::Player;
+use crate::savegame::{save_exists, LoadGameEvent, SaveGameEvent};
 use bevy::prelude::*;
 use bevy_egui::egui::{Color32, RichText};
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
@@ -9,6 +10,7 @@ pub struct MenuPlugin;
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<MenuState>()
+            .insert_resource(PauseMenuOpen(false))
             .add_systems(
                 EguiPrimaryContextPass,
                 display_main_menu.run_if(in_state(MenuState::MainMenu)),
@@ -17,11 +19,18 @@ impl Plugin for MenuPlugin {
                 EguiPrimaryContextPass,
                 display_country_selection.run_if(in_state(MenuState::CountrySelection)),
             )
+            .add_systems(
+                EguiPrimaryContextPass,
+                display_pause_menu.run_if(in_state(MenuState::InGame)),
+            )
+            .add_systems(
+                Update,
+                handle_escape_key.run_if(in_state(MenuState::InGame)),
+            )
             .add_systems(OnEnter(MenuState::InGame), hide_menu);
     }
 }
 
-/// Game menu state
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MenuState {
     #[default]
@@ -30,11 +39,26 @@ pub enum MenuState {
     InGame,
 }
 
-fn display_main_menu(mut contexts: EguiContexts, mut next_state: ResMut<NextState<MenuState>>) {
+#[derive(Resource)]
+pub struct PauseMenuOpen(pub bool);
+
+fn handle_escape_key(keyboard: Res<ButtonInput<KeyCode>>, mut pause_menu: ResMut<PauseMenuOpen>) {
+    if keyboard.just_pressed(KeyCode::Escape) {
+        pause_menu.0 = !pause_menu.0;
+    }
+}
+
+fn display_main_menu(
+    mut contexts: EguiContexts,
+    mut next_state: ResMut<NextState<MenuState>>,
+    mut load_events: MessageWriter<LoadGameEvent>,
+) {
     let ctx = match contexts.ctx_mut() {
         Ok(c) => c,
         Err(_) => return,
     };
+
+    let has_save = save_exists();
 
     egui::CentralPanel::default()
         .frame(egui::Frame::new().fill(Color32::from_rgb(10, 10, 20)))
@@ -75,6 +99,35 @@ fn display_main_menu(mut contexts: EguiContexts, mut next_state: ResMut<NextStat
                     .clicked()
                 {
                     next_state.set(MenuState::CountrySelection);
+                }
+
+                ui.add_space(20.0);
+
+                let load_button = egui::Button::new(
+                    RichText::new("📂 Load Game")
+                        .font(egui::FontId::proportional(24.0))
+                        .color(if has_save {
+                            Color32::WHITE
+                        } else {
+                            Color32::DARK_GRAY
+                        }),
+                )
+                .fill(if has_save {
+                    Color32::from_rgb(60, 120, 80)
+                } else {
+                    Color32::from_rgb(40, 40, 40)
+                });
+
+                let load_response = ui.add_sized(button_size, load_button);
+
+                if has_save && load_response.clicked() {
+                    load_events.write(LoadGameEvent);
+                    next_state.set(MenuState::InGame);
+                    info!("Loading saved game...");
+                }
+
+                if !has_save {
+                    load_response.on_hover_text("No save file found");
                 }
 
                 ui.add_space(20.0);
@@ -123,7 +176,6 @@ fn display_country_selection(
 
                 ui.add_space(40.0);
 
-                // Grid of countries
                 let countries_vec: Vec<_> = countries.iter().collect();
 
                 if countries_vec.is_empty() {
@@ -165,7 +217,6 @@ fn display_country_selection(
 
                 ui.add_space(40.0);
 
-                // Back button
                 if ui
                     .add_sized(
                         egui::vec2(150.0, 40.0),
@@ -184,6 +235,169 @@ fn display_country_selection(
         });
 }
 
-fn hide_menu() {
+fn display_pause_menu(
+    mut contexts: EguiContexts,
+    mut pause_menu: ResMut<PauseMenuOpen>,
+    mut next_state: ResMut<NextState<MenuState>>,
+    mut save_events: MessageWriter<SaveGameEvent>,
+    mut load_events: MessageWriter<LoadGameEvent>,
+) {
+    if !pause_menu.0 {
+        return;
+    }
+
+    let ctx = match contexts.ctx_mut() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let has_save = save_exists();
+
+    egui::Area::new(egui::Id::new("pause_overlay"))
+        .fixed_pos(egui::pos2(0.0, 0.0))
+        .show(ctx, |ui| {
+            let screen_rect = ui.ctx().screen_rect();
+            ui.painter().rect_filled(
+                screen_rect,
+                0.0,
+                Color32::from_rgba_unmultiplied(0, 0, 0, 180),
+            );
+        });
+
+    egui::Window::new("Pause Menu")
+        .collapsible(false)
+        .resizable(false)
+        .title_bar(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .frame(
+            egui::Frame::new()
+                .fill(Color32::from_rgb(30, 30, 40))
+                .inner_margin(30.0)
+                .corner_radius(10.0),
+        )
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    RichText::new("⏸ PAUSED")
+                        .font(egui::FontId::proportional(36.0))
+                        .color(Color32::WHITE)
+                        .strong(),
+                );
+
+                ui.add_space(30.0);
+
+                let button_size = egui::vec2(200.0, 45.0);
+
+                if ui
+                    .add_sized(
+                        button_size,
+                        egui::Button::new(
+                            RichText::new("▶ Resume")
+                                .font(egui::FontId::proportional(20.0))
+                                .color(Color32::WHITE),
+                        )
+                        .fill(Color32::from_rgb(60, 120, 80)),
+                    )
+                    .clicked()
+                {
+                    pause_menu.0 = false;
+                }
+
+                ui.add_space(15.0);
+
+                if ui
+                    .add_sized(
+                        button_size,
+                        egui::Button::new(
+                            RichText::new("💾 Save Game")
+                                .font(egui::FontId::proportional(20.0))
+                                .color(Color32::WHITE),
+                        )
+                        .fill(Color32::from_rgb(80, 80, 120)),
+                    )
+                    .clicked()
+                {
+                    save_events.write(SaveGameEvent);
+                    info!("Game saved!");
+                }
+
+                ui.add_space(15.0);
+
+                let load_button = egui::Button::new(
+                    RichText::new("📂 Load Game")
+                        .font(egui::FontId::proportional(20.0))
+                        .color(if has_save {
+                            Color32::WHITE
+                        } else {
+                            Color32::DARK_GRAY
+                        }),
+                )
+                .fill(if has_save {
+                    Color32::from_rgb(60, 100, 80)
+                } else {
+                    Color32::from_rgb(40, 40, 40)
+                });
+
+                let load_response = ui.add_sized(button_size, load_button);
+
+                if has_save && load_response.clicked() {
+                    load_events.write(LoadGameEvent);
+                    pause_menu.0 = false;
+                    info!("Loading saved game...");
+                }
+
+                if !has_save {
+                    load_response.on_hover_text("No save file found");
+                }
+
+                ui.add_space(15.0);
+
+                if ui
+                    .add_sized(
+                        button_size,
+                        egui::Button::new(
+                            RichText::new("🏠 Main Menu")
+                                .font(egui::FontId::proportional(20.0))
+                                .color(Color32::WHITE),
+                        )
+                        .fill(Color32::from_rgb(120, 100, 60)),
+                    )
+                    .clicked()
+                {
+                    pause_menu.0 = false;
+                    next_state.set(MenuState::MainMenu);
+                }
+
+                ui.add_space(15.0);
+
+                if ui
+                    .add_sized(
+                        button_size,
+                        egui::Button::new(
+                            RichText::new("❌ Quit Game")
+                                .font(egui::FontId::proportional(20.0))
+                                .color(Color32::WHITE),
+                        )
+                        .fill(Color32::from_rgb(120, 60, 60)),
+                    )
+                    .clicked()
+                {
+                    std::process::exit(0);
+                }
+
+                ui.add_space(10.0);
+
+                ui.label(
+                    RichText::new("Press ESC to resume")
+                        .font(egui::FontId::proportional(14.0))
+                        .color(Color32::GRAY)
+                        .italics(),
+                );
+            });
+        });
+}
+
+fn hide_menu(mut pause_menu: ResMut<PauseMenuOpen>) {
+    pause_menu.0 = false;
     info!("Game started - hiding menu");
 }

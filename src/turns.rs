@@ -42,6 +42,10 @@ impl Turn {
     pub(crate) fn current_turn(&self) -> u32 {
         self.current_turn
     }
+
+    pub(crate) fn set(&mut self, turn: u32) {
+        self.current_turn = turn;
+    }
 }
 
 /// Different states the game can be in.

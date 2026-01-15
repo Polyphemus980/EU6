@@ -8,6 +8,7 @@ mod layout;
 mod map;
 mod menu;
 mod player;
+mod savegame;
 mod turns;
 mod war;
 
@@ -17,6 +18,7 @@ use crate::layout::LayoutPlugin;
 use crate::map::MapPlugin;
 use crate::menu::MenuPlugin;
 use crate::player::PlayerPlugin;
+use crate::savegame::SaveGamePlugin;
 use crate::turns::TurnsPlugin;
 use crate::war::WarPlugin;
 use bevy::log::{Level, LogPlugin};
@@ -40,6 +42,7 @@ fn main() {
             PlayerPlugin,
             WarPlugin,
             MenuPlugin,
+            SaveGamePlugin,
         ))
         .add_systems(Startup, setup_camera)
         .run();

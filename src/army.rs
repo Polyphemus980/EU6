@@ -239,14 +239,19 @@ pub(crate) fn army_movement_system(
         let path = bfs(
             &from_pos.0,
             |p| {
-                p.neighbors().into_iter().filter(|n| {
-                    if let Some(&entity) = province_map.get_entity(n) {
-                        if let Ok(province) = provinces.get(entity) {
-                            return province.is_passable();
+                let neighbors: Vec<Hex> = p
+                    .neighbors()
+                    .into_iter()
+                    .filter(|n| {
+                        if let Some(&entity) = province_map.get_entity(n) {
+                            if let Ok(province) = provinces.get(entity) {
+                                return province.is_passable();
+                            }
                         }
-                    }
-                    false
-                })
+                        false
+                    })
+                    .collect();
+                neighbors
             },
             |p| *p == event.to.0,
         );
@@ -257,11 +262,19 @@ pub(crate) fn army_movement_system(
             if !deck.is_empty() {
                 commands
                     .entity(event.army)
-                    .insert(ActivePath { path: deck });
-                info!("Army {:?} started moving to {:?}", event.army, event.to);
+                    .insert(ActivePath { path: deck.clone() });
+                info!(
+                    "Army {:?} started moving to {:?}, path length: {}",
+                    event.army,
+                    event.to,
+                    deck.len()
+                );
             }
         } else {
-            info!("No path found for army {:?} to {:?}", event.army, event.to);
+            warn!(
+                "No path found for army {:?} from {:?} to {:?}",
+                event.army, from_pos, event.to
+            );
         }
     }
     Ok(())
@@ -390,11 +403,12 @@ pub(crate) fn move_active_armies(
         }
 
         if let Some(&occupant_entity) = army_hex_map.get(&next_pos) {
-            // Check if already in battle to avoid double triggers or weird states
-            // We can check if either entity has InBattle component, but we don't have it in query yet.
-            // Let's assume if they have ActivePath they are not fighting yet (we remove it).
-
-            if let Ok(
+            // Check if occupant entity still exists (might have been destroyed in battle)
+            if armies_query.get(occupant_entity).is_err() {
+                // Occupant was destroyed, clean up hex map
+                army_hex_map.remove(&next_pos);
+                // Continue to normal movement below
+            } else if let Ok(
                 [
                     (e1, _, owner1, comp1, _, _, _),
                     (e2, _, owner2, mut comp2, _, _, _),
@@ -465,7 +479,7 @@ pub(crate) fn move_active_armies(
                     continue;
                 }
             } else {
-                warn!("Could not retrieve both armies for collision resolution");
+                // Could not get both armies - one might have been destroyed, skip
                 continue;
             }
         }
@@ -1192,10 +1206,28 @@ fn end_battle_multi(
         BattleSide::Defender => battle.defender_country,
     };
 
-    let winners = match winner_side {
-        BattleSide::Attacker => &battle.attackers,
-        BattleSide::Defender => &battle.defenders,
+    let (winners, losers) = match winner_side {
+        BattleSide::Attacker => (&battle.attackers, &battle.defenders),
+        BattleSide::Defender => (&battle.defenders, &battle.attackers),
     };
+
+    // Remove losers from hex map and despawn them
+    for &army_entity in losers {
+        // Find and remove from hex map
+        if let Some(pos) = army_hex_map
+            .tiles
+            .iter()
+            .find_map(|(k, v)| if *v == army_entity { Some(*k) } else { None })
+        {
+            army_hex_map.remove(&pos);
+            info!(
+                "Removed defeated army {:?} from hex map at {:?}",
+                army_entity, pos
+            );
+        }
+        commands.entity(army_entity).remove::<InBattle>();
+        commands.entity(army_entity).despawn();
+    }
 
     // Remove InBattle from all surviving armies and position them
     for &army_entity in winners {
@@ -1203,6 +1235,8 @@ fn end_battle_multi(
 
         // Move winner to battle location
         if let Ok((_, _, mut pos, _)) = armies.get_mut(army_entity) {
+            // First remove from old position
+            army_hex_map.remove(&*pos);
             *pos = HexPos(battle_location);
             commands
                 .entity(army_entity)
@@ -1215,6 +1249,10 @@ fn end_battle_multi(
     // Put one winner army on the hex map (others are "stacked")
     if let Some(&first_winner) = winners.first() {
         army_hex_map.insert(HexPos(battle_location), first_winner);
+        info!(
+            "Winner army {:?} placed at {:?}",
+            first_winner, battle_location
+        );
     }
 
     // Occupy province if attackers won

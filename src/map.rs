@@ -5,19 +5,21 @@ use crate::buildings::{Building, BuildingType, Income};
 use crate::country::{Coffer, DisplayName, MapColor, SelectedCountry};
 use crate::hex::Hex;
 use crate::player::Player;
-use crate::warn;
 use crate::{consts, egui_common};
 use bevy::asset::Assets;
 use bevy::color::{Color, Mix};
+use bevy::log::info;
 use bevy::mesh::{Mesh, Mesh2d};
 use bevy::picking::Pickable;
 use bevy::prelude::{
-    Children, Click, ColorMaterial, Commands, Component, Entity, Local, MeshMaterial2d,
-    MessageWriter, On, Pointer, PointerButton, Query, RegularPolygon, ResMut, Resource, Transform,
+    warn, Children, Click, ColorMaterial, Commands, Component, Entity, Local,
+    MeshMaterial2d, MessageWriter, On, Pointer, PointerButton, Query, RegularPolygon, ResMut, Resource,
+    Transform,
 };
 use bevy::prelude::{Res, Result};
 use bevy_egui::egui::{Align2, Color32, RichText, Stroke};
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
+use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 
@@ -240,72 +242,148 @@ impl From<u8> for Terrain {
             2 => Terrain::Mountains,
             3 => Terrain::Forest,
             4 => Terrain::Desert,
+            5 => Terrain::Wasteland,
             _ => Terrain::Sea,
         }
     }
 }
 
-/// System to generate a hex map of provinces at startup.
+impl Terrain {
+    fn from_str(s: &str) -> Self {
+        match s {
+            "Plains" => Terrain::Plains,
+            "Hills" => Terrain::Hills,
+            "Mountains" => Terrain::Mountains,
+            "Forest" => Terrain::Forest,
+            "Desert" => Terrain::Desert,
+            "Wasteland" => Terrain::Wasteland,
+            "Sea" => Terrain::Sea,
+            _ => Terrain::Plains,
+        }
+    }
+}
+
+/// Path to the map file
+const MAP_FILE_PATH: &str = "assets/maps/default.json";
+
+/// JSON structures for map loading
+#[derive(Deserialize)]
+struct MapFile {
+    countries: Vec<CountryDef>,
+    provinces: Vec<ProvinceDef>,
+}
+
+#[derive(Deserialize, Clone)]
+pub(crate) struct CountryDef {
+    pub(crate) name: String,
+    pub(crate) color: [f32; 3],
+}
+
+#[derive(Deserialize)]
+struct ProvinceDef {
+    q: i32,
+    r: i32,
+    terrain: String,
+    name: String,
+    owner: Option<String>,
+}
+
+/// Resource storing loaded map data for use by other systems
+#[derive(Resource, Default)]
+pub(crate) struct MapData {
+    pub(crate) countries: Vec<CountryDef>,
+    pub(crate) province_owners: HashMap<Hex, String>,
+}
+
+/// Load map from JSON file
+fn load_map_from_file() -> Option<MapFile> {
+    // Try multiple paths
+    let paths_to_try = [
+        MAP_FILE_PATH.to_string(),
+        format!("./{}", MAP_FILE_PATH),
+        format!("../{}", MAP_FILE_PATH),
+    ];
+
+    for path in &paths_to_try {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            // Remove BOM if present
+            let content = content.trim_start_matches('\u{feff}');
+
+            match serde_json::from_str(content) {
+                Ok(map) => {
+                    info!("Successfully loaded map from '{}'", path);
+                    return Some(map);
+                }
+                Err(e) => {
+                    warn!("Failed to parse map file '{}': {}", path, e);
+                }
+            }
+        }
+    }
+
+    // Print current directory for debugging
+    if let Ok(cwd) = std::env::current_dir() {
+        warn!("Current working directory: {:?}", cwd);
+    }
+    warn!(
+        "Could not find or load map file. Tried paths: {:?}",
+        paths_to_try
+    );
+    None
+}
+
+/// System to generate a hex map of provinces at startup from JSON file.
 pub(crate) fn generate_map(
     mut commands: Commands,
     mut hex_map: ResMut<ProvinceHexMap>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    let map_radius = 8i32;
-
-    for q in -map_radius..=map_radius {
-        for r in -map_radius..=map_radius {
-            let hex = Hex::new(q, r);
-
-            // Calculate distance from center for terrain generation
-            let distance = hex.distance(&Hex::ZERO);
-
-            // Skip hexes outside the map radius
-            if distance > map_radius {
-                continue;
-            }
-
-            // Generate terrain based on distance from center and position
-            let terrain = if distance >= map_radius - 1 {
-                // Outer ring is sea
-                Terrain::Sea
-            } else if distance >= map_radius - 2 {
-                // Next ring is mostly wasteland with some sea
-                if (q + r) % 3 == 0 {
-                    Terrain::Wasteland
-                } else {
-                    Terrain::Sea
-                }
-            } else {
-                // Inner areas have varied terrain
-                match ((q.abs() + r.abs()) % 5) as u8 {
-                    0 => Terrain::Plains,
-                    1 => Terrain::Hills,
-                    2 => Terrain::Forest,
-                    3 => Terrain::Mountains,
-                    4 => Terrain::Desert,
-                    _ => Terrain::Plains,
-                }
-            };
-
-            let province = Province {
-                name: format!("Province_{}_{}", q, r),
-                hex,
-                terrain,
-            };
-
-            let province_entity =
-                build_province_entity(&mut meshes, &mut materials, province, consts::HEX_SIZE);
-
-            let province_id = commands
-                .spawn(province_entity)
-                .observe(handle_province_click)
-                .id();
-
-            hex_map.tiles.insert(hex, province_id);
+    let map_file = match load_map_from_file() {
+        Some(m) => m,
+        None => {
+            panic!(
+                "Failed to load map file! The game requires a valid map at {}",
+                MAP_FILE_PATH
+            );
         }
+    };
+
+    let mut province_owners = HashMap::new();
+
+    for prov_def in &map_file.provinces {
+        let hex = Hex::new(prov_def.q, prov_def.r);
+        let terrain = Terrain::from_str(&prov_def.terrain);
+
+        // Store owner info for later assignment
+        if let Some(owner) = &prov_def.owner {
+            province_owners.insert(hex, owner.clone());
+        }
+
+        let province = Province {
+            name: prov_def.name.clone(),
+            hex,
+            terrain,
+        };
+
+        let province_entity =
+            build_province_entity(&mut meshes, &mut materials, province, consts::HEX_SIZE);
+
+        let province_id = commands
+            .spawn(province_entity)
+            .observe(handle_province_click)
+            .id();
+
+        hex_map.tiles.insert(hex, province_id);
     }
+
+    // Insert map data resource for use by country system
+    commands.insert_resource(MapData {
+        countries: map_file.countries,
+        province_owners,
+    });
+
+    info!("Map generation complete: {} provinces", hex_map.tiles.len());
 }
 
 /// Event handler for when a province is clicked. Manages selection and deselection of provinces.

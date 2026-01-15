@@ -1,0 +1,537 @@
+{
+  "countries": [
+    {
+      "name": "Italia",
+      "color": [
+        0.0,
+        0.6,
+        0.3
+      ]
+    },
+    {
+      "name": "Francia",
+      "color": [
+        0.2,
+        0.3,
+        0.8
+      ]
+    },
+    {
+      "name": "Britannia",
+      "color": [
+        0.8,
+        0.1,
+        0.2
+      ]
+    },
+    {
+      "name": "Germania",
+      "color": [
+        0.8,
+        0.8,
+        0.2
+      ]
+    },
+    {
+      "name": "Hispania",
+      "color": [
+        0.9,
+        0.6,
+        0.1
+      ]
+    }
+  ],
+  "provinces": [
+    {
+      "q": 0,
+      "r": 0,
+      "terrain": "Plains",
+      "name": "Roma",
+      "owner": "Italia"
+    },
+    {
+      "q": 1,
+      "r": 0,
+      "terrain": "Hills",
+      "name": "Firenze",
+      "owner": "Italia"
+    },
+    {
+      "q": 0,
+      "r": 1,
+      "terrain": "Plains",
+      "name": "Napoli",
+      "owner": "Italia"
+    },
+    {
+      "q": -1,
+      "r": 1,
+      "terrain": "Forest",
+      "name": "Sardinia",
+      "owner": "Italia"
+    },
+    {
+      "q": 1,
+      "r": -1,
+      "terrain": "Hills",
+      "name": "Milano",
+      "owner": "Italia"
+    },
+    {
+      "q": -1,
+      "r": 0,
+      "terrain": "Plains",
+      "name": "Genoa",
+      "owner": "Italia"
+    },
+    {
+      "q": 0,
+      "r": -1,
+      "terrain": "Plains",
+      "name": "Venice",
+      "owner": "Italia"
+    },
+    {
+      "q": 2,
+      "r": 0,
+      "terrain": "Plains",
+      "name": "Paris",
+      "owner": "Francia"
+    },
+    {
+      "q": 2,
+      "r": 1,
+      "terrain": "Forest",
+      "name": "Lyon",
+      "owner": "Francia"
+    },
+    {
+      "q": 3,
+      "r": 0,
+      "terrain": "Plains",
+      "name": "Marseille",
+      "owner": "Francia"
+    },
+    {
+      "q": 3,
+      "r": -1,
+      "terrain": "Hills",
+      "name": "Bordeaux",
+      "owner": "Francia"
+    },
+    {
+      "q": 2,
+      "r": -1,
+      "terrain": "Plains",
+      "name": "Orleans",
+      "owner": "Francia"
+    },
+    {
+      "q": 3,
+      "r": 1,
+      "terrain": "Plains",
+      "name": "Nice",
+      "owner": "Francia"
+    },
+    {
+      "q": 4,
+      "r": 0,
+      "terrain": "Forest",
+      "name": "Toulouse",
+      "owner": "Francia"
+    },
+    {
+      "q": 4,
+      "r": -1,
+      "terrain": "Plains",
+      "name": "Normandy",
+      "owner": "Francia"
+    },
+    {
+      "q": 1,
+      "r": 1,
+      "terrain": "Plains",
+      "name": "Provence",
+      "owner": "Francia"
+    },
+    {
+      "q": -2,
+      "r": 0,
+      "terrain": "Hills",
+      "name": "London",
+      "owner": "Britannia"
+    },
+    {
+      "q": -2,
+      "r": 1,
+      "terrain": "Plains",
+      "name": "York",
+      "owner": "Britannia"
+    },
+    {
+      "q": -3,
+      "r": 0,
+      "terrain": "Forest",
+      "name": "Edinburgh",
+      "owner": "Britannia"
+    },
+    {
+      "q": -3,
+      "r": 1,
+      "terrain": "Hills",
+      "name": "Dublin",
+      "owner": "Britannia"
+    },
+    {
+      "q": -2,
+      "r": -1,
+      "terrain": "Plains",
+      "name": "Wales",
+      "owner": "Britannia"
+    },
+    {
+      "q": -3,
+      "r": 2,
+      "terrain": "Plains",
+      "name": "Cornwall",
+      "owner": "Britannia"
+    },
+    {
+      "q": -4,
+      "r": 1,
+      "terrain": "Hills",
+      "name": "Belfast",
+      "owner": "Britannia"
+    },
+    {
+      "q": -4,
+      "r": 2,
+      "terrain": "Plains",
+      "name": "Glasgow",
+      "owner": "Britannia"
+    },
+    {
+      "q": -1,
+      "r": -1,
+      "terrain": "Plains",
+      "name": "Canterbury",
+      "owner": "Britannia"
+    },
+    {
+      "q": 0,
+      "r": -2,
+      "terrain": "Hills",
+      "name": "Berlin",
+      "owner": "Germania"
+    },
+    {
+      "q": 1,
+      "r": -2,
+      "terrain": "Plains",
+      "name": "Hamburg",
+      "owner": "Germania"
+    },
+    {
+      "q": -1,
+      "r": -2,
+      "terrain": "Forest",
+      "name": "Munich",
+      "owner": "Germania"
+    },
+    {
+      "q": 0,
+      "r": -3,
+      "terrain": "Hills",
+      "name": "Frankfurt",
+      "owner": "Germania"
+    },
+    {
+      "q": 1,
+      "r": -3,
+      "terrain": "Plains",
+      "name": "Cologne",
+      "owner": "Germania"
+    },
+    {
+      "q": 2,
+      "r": -2,
+      "terrain": "Plains",
+      "name": "Vienna",
+      "owner": "Germania"
+    },
+    {
+      "q": -1,
+      "r": -3,
+      "terrain": "Mountains",
+      "name": "Zurich",
+      "owner": "Germania"
+    },
+    {
+      "q": 2,
+      "r": -3,
+      "terrain": "Hills",
+      "name": "Prague",
+      "owner": "Germania"
+    },
+    {
+      "q": 0,
+      "r": 2,
+      "terrain": "Desert",
+      "name": "Madrid",
+      "owner": "Hispania"
+    },
+    {
+      "q": 1,
+      "r": 2,
+      "terrain": "Plains",
+      "name": "Barcelona",
+      "owner": "Hispania"
+    },
+    {
+      "q": -1,
+      "r": 2,
+      "terrain": "Hills",
+      "name": "Lisbon",
+      "owner": "Hispania"
+    },
+    {
+      "q": 0,
+      "r": 3,
+      "terrain": "Desert",
+      "name": "Seville",
+      "owner": "Hispania"
+    },
+    {
+      "q": 1,
+      "r": 3,
+      "terrain": "Plains",
+      "name": "Valencia",
+      "owner": "Hispania"
+    },
+    {
+      "q": -1,
+      "r": 3,
+      "terrain": "Desert",
+      "name": "Porto",
+      "owner": "Hispania"
+    },
+    {
+      "q": 2,
+      "r": 2,
+      "terrain": "Hills",
+      "name": "Zaragoza",
+      "owner": "Hispania"
+    },
+    {
+      "q": -2,
+      "r": 3,
+      "terrain": "Desert",
+      "name": "Granada",
+      "owner": "Hispania"
+    },
+    {
+      "q": 5,
+      "r": 0,
+      "terrain": "Sea",
+      "name": "Atlantic_West",
+      "owner": null
+    },
+    {
+      "q": 5,
+      "r": -1,
+      "terrain": "Sea",
+      "name": "Atlantic_NW",
+      "owner": null
+    },
+    {
+      "q": 5,
+      "r": -2,
+      "terrain": "Sea",
+      "name": "North_Sea",
+      "owner": null
+    },
+    {
+      "q": 4,
+      "r": -3,
+      "terrain": "Sea",
+      "name": "Baltic_West",
+      "owner": null
+    },
+    {
+      "q": 3,
+      "r": -3,
+      "terrain": "Sea",
+      "name": "Baltic_East",
+      "owner": null
+    },
+    {
+      "q": -4,
+      "r": 0,
+      "terrain": "Sea",
+      "name": "Celtic_Sea",
+      "owner": null
+    },
+    {
+      "q": -4,
+      "r": -1,
+      "terrain": "Sea",
+      "name": "Irish_Sea",
+      "owner": null
+    },
+    {
+      "q": -5,
+      "r": 1,
+      "terrain": "Sea",
+      "name": "Atlantic_North",
+      "owner": null
+    },
+    {
+      "q": -5,
+      "r": 2,
+      "terrain": "Sea",
+      "name": "Atlantic_NW2",
+      "owner": null
+    },
+    {
+      "q": 0,
+      "r": 4,
+      "terrain": "Sea",
+      "name": "Mediterranean_W",
+      "owner": null
+    },
+    {
+      "q": 1,
+      "r": 4,
+      "terrain": "Sea",
+      "name": "Mediterranean_C",
+      "owner": null
+    },
+    {
+      "q": 2,
+      "r": 4,
+      "terrain": "Sea",
+      "name": "Mediterranean_E",
+      "owner": null
+    },
+    {
+      "q": 3,
+      "r": 3,
+      "terrain": "Sea",
+      "name": "Adriatic_S",
+      "owner": null
+    },
+    {
+      "q": 4,
+      "r": 2,
+      "terrain": "Sea",
+      "name": "Adriatic_N",
+      "owner": null
+    },
+    {
+      "q": -2,
+      "r": 4,
+      "terrain": "Sea",
+      "name": "Atlantic_SW",
+      "owner": null
+    },
+    {
+      "q": -3,
+      "r": 4,
+      "terrain": "Sea",
+      "name": "Atlantic_S",
+      "owner": null
+    },
+    {
+      "q": 4,
+      "r": 1,
+      "terrain": "Sea",
+      "name": "Tyrrhenian",
+      "owner": null
+    },
+    {
+      "q": -4,
+      "r": 3,
+      "terrain": "Sea",
+      "name": "Bay_Biscay",
+      "owner": null
+    },
+    {
+      "q": -5,
+      "r": 3,
+      "terrain": "Sea",
+      "name": "Atlantic_Far",
+      "owner": null
+    },
+    {
+      "q": 5,
+      "r": 1,
+      "terrain": "Sea",
+      "name": "Ligurian",
+      "owner": null
+    },
+    {
+      "q": -3,
+      "r": -1,
+      "terrain": "Sea",
+      "name": "North_Atlantic",
+      "owner": null
+    },
+    {
+      "q": 3,
+      "r": -4,
+      "terrain": "Sea",
+      "name": "North_Sea_E",
+      "owner": null
+    },
+    {
+      "q": 2,
+      "r": -4,
+      "terrain": "Sea",
+      "name": "Skagerrak",
+      "owner": null
+    },
+    {
+      "q": -2,
+      "r": -2,
+      "terrain": "Sea",
+      "name": "English_Channel",
+      "owner": null
+    },
+    {
+      "q": -3,
+      "r": 3,
+      "terrain": "Wasteland",
+      "name": "Pyrenees_W",
+      "owner": null
+    },
+    {
+      "q": -2,
+      "r": 2,
+      "terrain": "Wasteland",
+      "name": "Pyrenees_E",
+      "owner": null
+    },
+    {
+      "q": 4,
+      "r": -2,
+      "terrain": "Wasteland",
+      "name": "Alps_W",
+      "owner": null
+    },
+    {
+      "q": 3,
+      "r": -2,
+      "terrain": "Wasteland",
+      "name": "Alps_E",
+      "owner": null
+    },
+    {
+      "q": -4,
+      "r": 4,
+      "terrain": "Wasteland",
+      "name": "Cantabrian",
+      "owner": null
+    }
+  ]
+}
+

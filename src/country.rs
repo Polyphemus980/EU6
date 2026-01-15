@@ -1,5 +1,6 @@
 ﻿use crate::egui_common;
-use crate::map::{Owner, Province};
+use crate::map::{MapData, Owner, Province, ProvinceHexMap};
+use crate::menu::MenuState;
 use crate::player::Player;
 use crate::war::{
     draw_diplomacy_tab, DeclareWarEvent, Occupied, PeaceOfferEvent, War, WarRelations, Wars,
@@ -7,21 +8,27 @@ use crate::war::{
 use bevy::prelude::*;
 use bevy_egui::egui::{Color32, RichText};
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub struct CountryPlugin;
 
 impl Plugin for CountryPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(SelectedCountry::default())
-            .add_systems(Startup, setup_countries)
+            .add_systems(
+                Startup,
+                setup_countries_from_map.after(crate::map::generate_map),
+            )
             .add_systems(
                 Startup,
                 assign_province_ownership
                     .after(crate::map::generate_map)
-                    .after(setup_countries),
+                    .after(setup_countries_from_map),
             )
-            .add_systems(EguiPrimaryContextPass, display_country_panel);
+            .add_systems(
+                EguiPrimaryContextPass,
+                display_country_panel.run_if(in_state(MenuState::InGame)),
+            );
     }
 }
 
@@ -96,81 +103,63 @@ pub fn spawn_country(commands: &mut Commands, name: &str, color: Color) -> Entit
     commands.spawn(CountryBundle::new(name, color)).id()
 }
 
-/// Setup function for countries.
-pub(crate) fn setup_countries(mut commands: Commands) {
-    spawn_country(&mut commands, "Francia", Color::srgb(0.2, 0.3, 0.8)); // Blue
-    spawn_country(&mut commands, "Hispania", Color::srgb(0.9, 0.8, 0.1)); // Yellow
-    spawn_country(&mut commands, "Germania", Color::srgb(0.3, 0.3, 0.3)); // Gray
-    spawn_country(&mut commands, "Italia", Color::srgb(0.0, 0.6, 0.3)); // Green
-    spawn_country(&mut commands, "Britannia", Color::srgb(0.8, 0.1, 0.2)); // Red
+/// Setup countries from map data - creates country entities based on what's in the map file
+pub(crate) fn setup_countries_from_map(mut commands: Commands, map_data: Res<MapData>) {
+    info!(
+        "Setting up {} countries from map data",
+        map_data.countries.len()
+    );
+
+    for country_def in &map_data.countries {
+        let color = Color::srgb(
+            country_def.color[0],
+            country_def.color[1],
+            country_def.color[2],
+        );
+        let entity = spawn_country(&mut commands, &country_def.name, color);
+        info!("Created country: {} ({:?})", country_def.name, entity);
+    }
 }
 
-/// System to assign province ownership to countries based on province location.
+/// System to assign province ownership to countries based on map data.
 /// This runs after both countries and provinces have been spawned.
 pub(crate) fn assign_province_ownership(
     mut commands: Commands,
     provinces: Query<(Entity, &Province)>,
     countries: Query<(Entity, &DisplayName), With<Country>>,
+    map_data: Res<MapData>,
 ) {
-    // Create a list of countries for easy access
-    let country_list: Vec<(Entity, &str)> = countries
+    // Create a lookup from country name to entity
+    let country_lookup: HashMap<&str, Entity> = countries
         .iter()
-        .map(|(entity, name)| (entity, name.0.as_str()))
+        .map(|(entity, name)| (name.0.as_str(), entity))
         .collect();
 
-    if country_list.is_empty() {
+    if country_lookup.is_empty() {
+        warn!("No countries found for province assignment!");
         return;
     }
 
-    // Assign provinces to countries based on hex position
+    // Assign provinces based on map data
     for (province_entity, province) in provinces.iter() {
-        // Skip sea and wasteland provinces - they remain unowned
-        if !province.is_ownable() {
-            continue;
-        }
-
         let hex = province.get_hex();
 
-        // Assign ownership based on hex coordinates
-        // This creates distinct regions for each country
-        let owner = if hex.q() > 2 && hex.r() > -3 {
-            // East: Francia (Blue)
-            country_list
-                .iter()
-                .find(|(_, name)| *name == "Francia")
-                .map(|(e, _)| e)
-        } else if hex.q() < -2 && hex.r() < 3 {
-            // West: Britannia (Red)
-            country_list
-                .iter()
-                .find(|(_, name)| *name == "Britannia")
-                .map(|(e, _)| e)
-        } else if hex.r() > 2 && hex.q() > -3 {
-            // South: Hispania (Yellow)
-            country_list
-                .iter()
-                .find(|(_, name)| *name == "Hispania")
-                .map(|(e, _)| e)
-        } else if hex.r() < -2 && hex.q() < 3 {
-            // North: Germania (Gray)
-            country_list
-                .iter()
-                .find(|(_, name)| *name == "Germania")
-                .map(|(e, _)| e)
-        } else {
-            // Center: Italia (Green)
-            country_list
-                .iter()
-                .find(|(_, name)| *name == "Italia")
-                .map(|(e, _)| e)
-        };
-
-        if let Some(owner_entity) = owner {
-            commands
-                .entity(province_entity)
-                .insert(Owner(*owner_entity));
+        // Look up the owner from map data
+        if let Some(owner_name) = map_data.province_owners.get(hex) {
+            if let Some(&owner_entity) = country_lookup.get(owner_name.as_str()) {
+                commands.entity(province_entity).insert(Owner(owner_entity));
+            } else {
+                warn!(
+                    "Unknown country '{}' for province '{}'",
+                    owner_name,
+                    province.name()
+                );
+            }
         }
+        // If no owner in map data, province stays unowned
     }
+
+    info!("Province ownership assigned from map data");
 }
 
 /// Enum for country panel tabs

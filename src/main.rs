@@ -6,6 +6,7 @@ mod egui_common;
 mod hex;
 mod layout;
 mod map;
+mod menu;
 mod player;
 mod turns;
 mod war;
@@ -14,6 +15,7 @@ use crate::army::ArmyPlugin;
 use crate::country::CountryPlugin;
 use crate::layout::LayoutPlugin;
 use crate::map::MapPlugin;
+use crate::menu::MenuPlugin;
 use crate::player::PlayerPlugin;
 use crate::turns::TurnsPlugin;
 use crate::war::WarPlugin;
@@ -37,6 +39,7 @@ fn main() {
             TurnsPlugin,
             PlayerPlugin,
             WarPlugin,
+            MenuPlugin,
         ))
         .add_systems(Startup, setup_camera)
         .run();

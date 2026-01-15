@@ -7,6 +7,8 @@ use bevy::ecs::error::Result;
 use bevy::mesh::Mesh;
 use bevy::prelude::*;
 use bevy::sprite::Sprite;
+use bevy_egui::egui::{Align2, Color32, RichText};
+use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use pathfinding::prelude::bfs;
 use std::collections::{HashMap, VecDeque};
 
@@ -24,7 +26,8 @@ impl Plugin for ArmyPlugin {
             .add_systems(Update, army_movement_system)
             .add_systems(Update, draw_path_gizmos) // Add this for visualization
             .add_systems(Update, handle_army_interaction_changed)
-            .add_systems(Update, handle_army_composition_changed);
+            .add_systems(Update, handle_army_composition_changed)
+            .add_systems(EguiPrimaryContextPass, display_army_panel);
     }
 }
 
@@ -89,6 +92,35 @@ pub(crate) struct ArmyComposition {
     pub(crate) artillery: u32,
 }
 
+#[derive(PartialEq, Copy, Clone)]
+pub(crate) enum UnitType {
+    Infantry,
+    Cavalry,
+    Artillery,
+}
+
+impl UnitType {
+    pub(crate) fn cost(&self) -> f32 {
+        match self {
+            UnitType::Infantry => 10.0,
+            UnitType::Cavalry => 25.0,
+            UnitType::Artillery => 30.0,
+        }
+    }
+
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            UnitType::Infantry => "Infantry",
+            UnitType::Cavalry => "Cavalry",
+            UnitType::Artillery => "Artillery",
+        }
+    }
+
+    pub(crate) fn all() -> [UnitType; 3] {
+        [UnitType::Infantry, UnitType::Cavalry, UnitType::Artillery]
+    }
+}
+
 impl ArmyComposition {
     pub(crate) fn total_size(&self) -> u32 {
         self.infantry + self.cavalry + self.artillery
@@ -98,6 +130,14 @@ impl ArmyComposition {
         self.infantry += other.infantry;
         self.cavalry += other.cavalry;
         self.artillery += other.artillery;
+    }
+
+    pub(crate) fn add_unit(&mut self, unit: UnitType) {
+        match unit {
+            UnitType::Infantry => self.infantry += 1,
+            UnitType::Cavalry => self.cavalry += 1,
+            UnitType::Artillery => self.artillery += 1,
+        }
     }
 }
 
@@ -206,6 +246,7 @@ pub(crate) fn move_active_armies(
         ),
         With<Army>,
     >,
+    mut selected_army: ResMut<SelectedArmy>,
 ) {
     let movers: Vec<Entity> = armies_query
         .iter()
@@ -242,6 +283,12 @@ pub(crate) fn move_active_armies(
 
                     army_hex_map.remove(&old_pos);
                     commands.entity(e1).despawn();
+
+                    // If the merged army was selected, clear selection or select the target
+                    if selected_army.get() == Some(e1) {
+                        selected_army.set(e2);
+                        commands.entity(e2).insert(InteractionState::Selected);
+                    }
 
                     continue;
                 } else {
@@ -422,11 +469,21 @@ fn handle_army_click(
 
     if let Some(prev_entity) = selected.get() {
         if prev_entity == clicked_entity {
+            // Checking if entity still exists is nice but here if clicked_entity exists, and prev == clicked, then prev exists.
             commands.entity(prev_entity).insert(InteractionState::None);
             selected.clear();
             return;
         }
-        commands.entity(prev_entity).insert(InteractionState::None);
+        // SAFETY CHECK: Only issue commands if prev_entity still exists.
+        if owners.contains(prev_entity) {
+            commands.entity(prev_entity).insert(InteractionState::None);
+        } else {
+            // It's dead. Just ignore.
+            warn!(
+                "Previously selected army {:?} no longer exists.",
+                prev_entity
+            );
+        }
     }
     commands
         .entity(clicked_entity)
@@ -456,13 +513,91 @@ pub(crate) fn handle_army_interaction_changed(
 
 pub(crate) fn handle_army_composition_changed(
     army_query: Query<(&ArmyComposition, &Children), (With<Army>, Changed<ArmyComposition>)>,
-    mut label_query: Query<&mut ArmyLabel>,
+    mut label_query: Query<(&mut ArmyLabel, &mut Text2d)>, // Query both ArmyLabel and Text2d
 ) {
     for (composition, children) in &army_query {
         for &child in children {
-            if let Ok(mut label) = label_query.get_mut(child) {
-                label.0 = composition.total_size().to_string();
+            if let Ok((mut label, mut text)) = label_query.get_mut(child) {
+                let size_str = composition.total_size().to_string();
+                label.0 = size_str.clone();
+                *text = Text2d::new(size_str);
             }
         }
     }
+}
+
+pub(crate) fn display_army_panel(
+    mut contexts: EguiContexts,
+    mut commands: Commands,
+    mut selected_army: ResMut<SelectedArmy>,
+    armies: Query<(Entity, &ArmyComposition, &Owner), With<Army>>,
+    countries: Query<&crate::country::DisplayName>,
+) {
+    let Some(army_entity) = selected_army.get() else {
+        return;
+    };
+
+    let Ok((entity, composition, owner)) = armies.get(army_entity) else {
+        return;
+    };
+
+    let ctx = match contexts.ctx_mut() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let owner_name = countries
+        .get(owner.0)
+        .map(|d| d.0.as_str())
+        .unwrap_or("Unknown");
+
+    egui::Window::new("Army")
+        .frame(crate::egui_common::default_frame())
+        .title_bar(false)
+        .anchor(Align2::RIGHT_TOP, [-20.0, 20.0])
+        .resizable(false)
+        .default_width(200.0)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading("Army Info");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if crate::egui_common::close_button(ui) {
+                        commands.entity(entity).insert(InteractionState::None);
+                        selected_army.clear();
+                    }
+                });
+            });
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                ui.label("Owner:");
+                ui.label(RichText::new(owner_name).color(Color32::from_rgb(100, 200, 255)));
+            });
+
+            ui.add_space(5.0);
+            ui.label(RichText::new("Composition").strong());
+
+            egui::Grid::new("army_comp_grid")
+                .num_columns(2)
+                .show(ui, |ui| {
+                    ui.label("Infantry:");
+                    ui.label(composition.infantry.to_string());
+                    ui.end_row();
+
+                    ui.label("Cavalry:");
+                    ui.label(composition.cavalry.to_string());
+                    ui.end_row();
+
+                    ui.label("Artillery:");
+                    ui.label(composition.artillery.to_string());
+                    ui.end_row();
+
+                    ui.separator();
+                    ui.end_row();
+
+                    ui.label(RichText::new("Total:").strong());
+                    ui.label(RichText::new(composition.total_size().to_string()).strong());
+                    ui.end_row();
+                });
+        });
 }

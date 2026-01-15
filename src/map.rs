@@ -1,8 +1,11 @@
-﻿use crate::army::{HexPos, MoveArmyEvent, SelectedArmy};
+﻿use crate::army::{
+    spawn_army, ArmyComposition, ArmyHexMap, HexPos, MoveArmyEvent, SelectedArmy, UnitType,
+};
 use crate::buildings::{Building, BuildingType, Income};
 use crate::country::{Coffer, DisplayName, MapColor, SelectedCountry};
 use crate::hex::Hex;
 use crate::player::Player;
+use crate::warn;
 use crate::{consts, egui_common};
 use bevy::asset::Assets;
 use bevy::color::{Color, Mix};
@@ -391,11 +394,15 @@ pub(crate) fn display_province_panel(
     mut selected_province: ResMut<SelectedProvince>,
     mut selected_country: ResMut<SelectedCountry>,
     provinces: Query<(&Province, Option<&Owner>, Option<&Children>)>,
-    countries: Query<&DisplayName>,
+    countries: Query<(&DisplayName, &MapColor)>,
     buildings: Query<&Building>,
     mut coffers: Query<&mut Coffer>,
     mut current_tab: Local<ProvinceTab>,
     player: Res<Player>,
+    mut army_hex_map: ResMut<ArmyHexMap>,
+    mut armies_query: Query<(&Owner, &mut ArmyComposition)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     let Some(selected_id) = selected_province.get() else {
         return;
@@ -406,7 +413,7 @@ pub(crate) fn display_province_panel(
 
     let owner_name = maybe_owner
         .and_then(|owner| countries.get(owner.0).ok())
-        .map(|name| name.0.clone())
+        .map(|(name, _)| name.0.clone())
         .unwrap_or_else(|| "Unowned".to_string());
 
     let is_player_owned = maybe_owner
@@ -448,6 +455,7 @@ pub(crate) fn display_province_panel(
                 let tabs = [
                     (ProvinceTab::Overview, "Overview"),
                     (ProvinceTab::Buildings, "Buildings"),
+                    (ProvinceTab::Recruitment, "Recruitment"),
                 ];
 
                 for (tab, label) in tabs {
@@ -481,6 +489,95 @@ pub(crate) fn display_province_panel(
             ui.add_space(8.0);
 
             match *current_tab {
+                ProvinceTab::Recruitment => {
+                    let available_ducats = maybe_owner
+                        .and_then(|owner| coffers.get(owner.0).ok())
+                        .map(|coffer| coffer.get_ducats())
+                        .unwrap_or(0.0);
+
+                    ui.heading(RichText::new("Recruitment").size(16.0));
+                    ui.add_space(4.0);
+                    ui.label(format!("Available ducats: {:.0}💰", available_ducats));
+                    ui.separator();
+                    ui.add_space(8.0);
+
+                    if maybe_owner.is_none() {
+                        ui.label(RichText::new("This province has no owner").italics().weak());
+                        return;
+                    }
+
+                    if !is_player_owned {
+                        ui.label(
+                            RichText::new("You do not own this province")
+                                .italics()
+                                .weak(),
+                        );
+                        return;
+                    }
+
+                    for unit_type in UnitType::all() {
+                        let cost = unit_type.cost();
+                        let can_afford = available_ducats >= cost;
+
+                        ui.horizontal(|ui| {
+                            let button_text = format!("{} ({:.0}💰)", unit_type.name(), cost);
+                            let button =
+                                egui::Button::new(button_text).min_size(egui::vec2(200.0, 0.0));
+
+                            let button = if !can_afford {
+                                button.fill(Color32::from_rgb(80, 60, 60))
+                            } else {
+                                button.fill(Color32::from_rgb(70, 70, 90))
+                            };
+
+                            if ui.add_enabled(can_afford, button).clicked()
+                                && let Some(owner) = maybe_owner
+                                && let Ok(mut coffer) = coffers.get_mut(owner.0)
+                            {
+                                // Add unit
+                                let hex = *province.get_hex();
+                                let hex_pos = HexPos::new(hex);
+
+                                if let Some(&army_entity) = army_hex_map.get(&hex_pos) {
+                                    if let Ok((army_owner, mut comp)) =
+                                        armies_query.get_mut(army_entity)
+                                    {
+                                        if army_owner.0 == owner.0 {
+                                            // MERGE into existing army
+                                            coffer.remove_ducats(cost);
+                                            comp.add_unit(unit_type);
+                                        } else {
+                                            warn!("Cannot recruit: tile occupied by another army");
+                                        }
+                                    } else {
+                                        warn!("Map inconsistency: Army entity not found in query");
+                                    }
+                                } else if let Ok((_, map_color)) = countries.get(owner.0) {
+                                    // SPAWN new army
+                                    coffer.remove_ducats(cost);
+                                    let mut comp = ArmyComposition {
+                                        infantry: 0,
+                                        cavalry: 0,
+                                        artillery: 0,
+                                    };
+                                    comp.add_unit(unit_type);
+
+                                    let army = spawn_army(
+                                        &mut commands,
+                                        &mut meshes,
+                                        &mut materials,
+                                        hex,
+                                        owner.0,
+                                        map_color.0,
+                                        comp,
+                                    );
+                                    army_hex_map.insert(hex_pos, army);
+                                }
+                            }
+                        });
+                        ui.add_space(5.0);
+                    }
+                }
                 ProvinceTab::Buildings => {
                     let existing_buildings: HashSet<BuildingType> =
                         if let Some(children) = maybe_children {
@@ -631,4 +728,5 @@ pub(crate) enum ProvinceTab {
     #[default]
     Overview,
     Buildings,
+    Recruitment,
 }

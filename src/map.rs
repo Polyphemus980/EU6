@@ -111,6 +111,11 @@ impl Province {
         &self.hex
     }
 
+    /// Returns the terrain type of the province.
+    pub(crate) fn terrain(&self) -> Terrain {
+        self.terrain
+    }
+
     /// Determines if the province can be owned by a country based on its terrain type.
     pub(crate) fn is_ownable(&self) -> bool {
         !matches!(self.terrain, Terrain::Sea | Terrain::Wasteland)
@@ -133,8 +138,8 @@ const COLOR_WASTELAND: Color = Color::srgb(0.55, 0.50, 0.45); // Barren grayish-
 const COLOR_SEA: Color = Color::srgb(0.0, 0.53, 0.74); // Ocean blue
 
 /// Enum representing different terrain types for provinces.
-#[derive(Clone, Copy, PartialEq)]
-enum Terrain {
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum Terrain {
     Plains,
     Hills,
     Mountains,
@@ -181,6 +186,47 @@ impl Terrain {
             Terrain::Desert => 0.5,
             Terrain::Wasteland => 0.0,
             Terrain::Sea => 0.0,
+        }
+    }
+
+    /// Returns the defensive bonus multiplier for this terrain.
+    /// Values > 1.0 benefit the defender, < 1.0 benefit the attacker.
+    pub(crate) const fn defender_bonus(&self) -> f32 {
+        match self {
+            Terrain::Plains => 1.0,    // No bonus - open terrain
+            Terrain::Hills => 1.25,    // +25% defense - high ground advantage
+            Terrain::Mountains => 1.5, // +50% defense - strong defensive terrain
+            Terrain::Forest => 1.2,    // +20% defense - cover and ambush potential
+            Terrain::Desert => 0.9,    // -10% defense - exposed, no cover
+            Terrain::Wasteland => 1.0, // No bonus
+            Terrain::Sea => 1.0,       // No bonus (shouldn't happen)
+        }
+    }
+
+    /// Returns the cavalry effectiveness multiplier for this terrain.
+    /// Values < 1.0 reduce cavalry damage.
+    pub(crate) const fn cavalry_modifier(&self) -> f32 {
+        match self {
+            Terrain::Plains => 1.2,    // +20% - ideal cavalry terrain
+            Terrain::Hills => 0.8,     // -20% - difficult to charge
+            Terrain::Mountains => 0.5, // -50% - very bad for cavalry
+            Terrain::Forest => 0.6,    // -40% - trees block charges
+            Terrain::Desert => 1.1,    // +10% - open terrain
+            Terrain::Wasteland => 0.9, // -10% - rough ground
+            Terrain::Sea => 0.0,       // No cavalry at sea
+        }
+    }
+
+    /// Returns the artillery effectiveness multiplier for this terrain.
+    pub(crate) const fn artillery_modifier(&self) -> f32 {
+        match self {
+            Terrain::Plains => 1.0,    // Normal effectiveness
+            Terrain::Hills => 1.2,     // +20% - good firing positions
+            Terrain::Mountains => 0.7, // -30% - difficult positioning
+            Terrain::Forest => 0.6,    // -40% - blocked line of sight
+            Terrain::Desert => 1.1,    // +10% - clear sightlines
+            Terrain::Wasteland => 0.9, // -10%
+            Terrain::Sea => 0.0,       // No artillery at sea
         }
     }
 }

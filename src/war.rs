@@ -263,6 +263,12 @@ fn handle_declare_war(
     turn: Res<crate::turns::Turn>,
 ) {
     for event in events.read() {
+        // Cannot declare war on yourself
+        if event.attacker == event.defender {
+            warn!("Cannot declare war on yourself!");
+            continue;
+        }
+
         // Check if already at war
         if let Ok(relations) = war_relations.get(event.attacker) {
             if relations.is_at_war_with(event.defender) {

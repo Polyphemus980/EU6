@@ -19,6 +19,7 @@ impl Plugin for TurnsPlugin {
                 OnEnter(GameState::Processing),
                 crate::army::move_active_armies,
             )
+            .add_systems(OnEnter(GameState::Processing), crate::army::resolve_battles)
             .add_systems(EguiPrimaryContextPass, display_turn_button);
     }
 }

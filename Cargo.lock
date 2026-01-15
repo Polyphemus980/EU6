@@ -9,6 +9,7 @@ dependencies = [
  "bevy",
  "bevy_egui",
  "pathfinding",
+ "rand",
 ]
 
 [[package]]

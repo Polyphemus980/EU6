@@ -10,6 +10,7 @@ use bevy::sprite::Sprite;
 use bevy_egui::egui::{Align2, Color32, RichText};
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use pathfinding::prelude::bfs;
+use rand::Rng;
 use std::collections::{HashMap, VecDeque};
 
 pub struct ArmyPlugin;
@@ -27,7 +28,9 @@ impl Plugin for ArmyPlugin {
             .add_systems(Update, draw_path_gizmos) // Add this for visualization
             .add_systems(Update, handle_army_interaction_changed)
             .add_systems(Update, handle_army_composition_changed)
-            .add_systems(EguiPrimaryContextPass, display_army_panel);
+            .add_systems(EguiPrimaryContextPass, display_army_panel)
+            .add_systems(EguiPrimaryContextPass, display_battle_panel)
+            .add_systems(Update, resolve_battles);
     }
 }
 
@@ -121,6 +124,8 @@ impl UnitType {
     }
 }
 
+pub(crate) const REGIMENT_SIZE: u32 = 1000;
+
 impl ArmyComposition {
     pub(crate) fn total_size(&self) -> u32 {
         self.infantry + self.cavalry + self.artillery
@@ -134,18 +139,35 @@ impl ArmyComposition {
 
     pub(crate) fn add_unit(&mut self, unit: UnitType) {
         match unit {
-            UnitType::Infantry => self.infantry += 1,
-            UnitType::Cavalry => self.cavalry += 1,
-            UnitType::Artillery => self.artillery += 1,
+            UnitType::Infantry => self.infantry += REGIMENT_SIZE,
+            UnitType::Cavalry => self.cavalry += REGIMENT_SIZE,
+            UnitType::Artillery => self.artillery += REGIMENT_SIZE,
         }
     }
 }
+
+pub(crate) const MIN_DAMAGE: u32 = 5;
 
 #[derive(Component)]
 pub(crate) struct ArmyLabel(pub(crate) String);
 
 #[derive(Component)]
 pub(crate) struct SelectedRing {}
+
+#[derive(Component)]
+pub(crate) struct InBattle {
+    pub(crate) battle_entity: Entity,
+}
+
+#[derive(Component)]
+pub(crate) struct Battle {
+    pub(crate) attacker: Entity,
+    pub(crate) defender: Entity,
+    pub(crate) location: Hex,
+    pub(crate) round: u32,
+    pub(crate) last_damage_attacker: u32,
+    pub(crate) last_damage_defender: u32,
+}
 
 #[derive(Bundle)]
 pub(crate) struct ArmyBundle {
@@ -270,6 +292,10 @@ pub(crate) fn move_active_armies(
         let next_pos = HexPos(next_hex);
 
         if let Some(&occupant_entity) = army_hex_map.get(&next_pos) {
+            // Check if already in battle to avoid double triggers or weird states
+            // We can check if either entity has InBattle component, but we don't have it in query yet.
+            // Let's assume if they have ActivePath they are not fighting yet (we remove it).
+
             if let Ok(
                 [
                     (e1, _, owner1, comp1, _, _),
@@ -292,6 +318,35 @@ pub(crate) fn move_active_armies(
 
                     continue;
                 } else {
+                    // COMBAT START
+                    info!(
+                        "Battle started between {:?} (attacker) and {:?} (defender) at {:?}",
+                        e1, e2, next_hex
+                    );
+
+                    // Stop movement
+                    commands.entity(e1).remove::<ActivePath>();
+
+                    // Create Battle Entity
+                    let battle_id = commands
+                        .spawn(Battle {
+                            attacker: e1,
+                            defender: e2,
+                            location: next_hex,
+                            round: 0,
+                            last_damage_attacker: 0,
+                            last_damage_defender: 0,
+                        })
+                        .id();
+
+                    // Mark armies
+                    commands.entity(e1).insert(InBattle {
+                        battle_entity: battle_id,
+                    });
+                    commands.entity(e2).insert(InBattle {
+                        battle_entity: battle_id,
+                    });
+
                     continue;
                 }
             } else {
@@ -436,9 +491,9 @@ pub(crate) fn spawn_initial_armies(
                 country,
                 map_color.0,
                 ArmyComposition {
-                    infantry: 10,
-                    cavalry: 2,
-                    artillery: 1,
+                    infantry: 10 * REGIMENT_SIZE,
+                    cavalry: 2 * REGIMENT_SIZE,
+                    artillery: 1 * REGIMENT_SIZE,
                 },
             );
             army_hex_map.insert(HexPos(start_hex), army);
@@ -600,4 +655,375 @@ pub(crate) fn display_army_panel(
                     ui.end_row();
                 });
         });
+}
+
+pub(crate) fn display_battle_panel(
+    mut contexts: EguiContexts,
+    mut commands: Commands,
+    mut selected_army: ResMut<SelectedArmy>,
+    armies: Query<(&ArmyComposition, &Owner, Option<&InBattle>), With<Army>>,
+    battles: Query<&Battle>,
+    countries: Query<&crate::country::DisplayName>,
+) {
+    let Some(selected_entity) = selected_army.get() else {
+        return;
+    };
+
+    // Check if selected army is in battle
+    let Ok((_, _, maybe_in_battle)) = armies.get(selected_entity) else {
+        return;
+    };
+
+    let Some(in_battle) = maybe_in_battle else {
+        return; // Not in battle, don't show this panel
+    };
+
+    let Ok(battle) = battles.get(in_battle.battle_entity) else {
+        return; // Battle entity missing?
+    };
+
+    let ctx = match contexts.ctx_mut() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    egui::Window::new("Battle")
+        .frame(crate::egui_common::default_frame())
+        .title_bar(false)
+        .anchor(Align2::RIGHT_TOP, [-20.0, 20.0])
+        .resizable(false)
+        .default_width(300.0)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading("⚔ Battle ⚔");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if crate::egui_common::close_button(ui) {
+                        commands
+                            .entity(selected_entity)
+                            .insert(InteractionState::None);
+                        selected_army.clear();
+                    }
+                });
+            });
+            ui.separator();
+            ui.label(format!("Round: {}", battle.round));
+            ui.separator();
+
+            // Columns for Attacker vs Defender
+            ui.columns(2, |columns| {
+                columns[0].vertical_centered(|ui| {
+                    ui.label(
+                        RichText::new("Attacker")
+                            .strong()
+                            .color(Color32::from_rgb(255, 100, 100)),
+                    );
+                    if let Ok((comp, owner, _)) = armies.get(battle.attacker) {
+                        let name = countries
+                            .get(owner.0)
+                            .map(|d| d.0.as_str())
+                            .unwrap_or("Unknown");
+                        ui.label(name);
+                        ui.label(format!("Inf: {}", comp.infantry));
+                        ui.label(format!("Cav: {}", comp.cavalry));
+                        ui.label(format!("Art: {}", comp.artillery));
+                        ui.label(format!("Total: {}", comp.total_size()));
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(format!(
+                            "-{} casualties",
+                            battle.last_damage_defender
+                        ))); // Damage dealt BY attacker (so defender casualties)
+                        // Actually logic might be mixed. `last_damage_attacker` usually means damage SUFFERED by attacker.
+                        // Let's assume `last_damage_attacker` is damage TAKEN by attacker.
+                        ui.label(
+                            RichText::new(format!("Lost: {}", battle.last_damage_attacker))
+                                .color(Color32::RED),
+                        );
+                    } else {
+                        ui.label("(Eliminated)");
+                    }
+                });
+
+                columns[1].vertical_centered(|ui| {
+                    ui.label(
+                        RichText::new("Defender")
+                            .strong()
+                            .color(Color32::from_rgb(100, 100, 255)),
+                    );
+                    if let Ok((comp, owner, _)) = armies.get(battle.defender) {
+                        let name = countries
+                            .get(owner.0)
+                            .map(|d| d.0.as_str())
+                            .unwrap_or("Unknown");
+                        ui.label(name);
+                        ui.label(format!("Inf: {}", comp.infantry));
+                        ui.label(format!("Cav: {}", comp.cavalry));
+                        ui.label(format!("Art: {}", comp.artillery));
+                        ui.label(format!("Total: {}", comp.total_size()));
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new(format!("Lost: {}", battle.last_damage_defender))
+                                .color(Color32::RED),
+                        );
+                    } else {
+                        ui.label("(Eliminated)");
+                    }
+                });
+            });
+        });
+}
+
+pub(crate) fn resolve_battles(
+    mut commands: Commands,
+    mut battles: Query<(Entity, &mut Battle)>,
+    mut armies: Query<(Entity, &mut ArmyComposition, &mut HexPos)>,
+    mut army_hex_map: ResMut<ArmyHexMap>,
+    province_map: Res<ProvinceHexMap>,
+    provinces: Query<&Province>,
+) {
+    for (battle_entity, mut battle) in battles.iter_mut() {
+        // Collect participants
+        let (mut attacker_comp, mut attacker_pos) =
+            if let Ok((_, c, p)) = armies.get_mut(battle.attacker) {
+                (c, p)
+            } else {
+                // Attacker missing (despawned?), defender wins by default
+                end_battle(
+                    &mut commands,
+                    battle_entity,
+                    battle.defender,
+                    battle.attacker,
+                    &mut army_hex_map,
+                    &province_map,
+                    &provinces,
+                    None,
+                    None,
+                );
+                continue;
+            };
+
+        // Re-query needed because get_mut borrows exclusive
+        // Actually we need get_many_mut
+        let Ok(
+            [
+                (attacker_entity, mut attacker_comp, mut attacker_pos),
+                (defender_entity, mut defender_comp, mut defender_pos),
+            ],
+        ) = armies.get_many_mut([battle.attacker, battle.defender])
+        else {
+            // Someone missing
+            commands.entity(battle_entity).despawn();
+            if let Ok((entity, _, _)) = armies.get(battle.attacker) {
+                commands.entity(entity).remove::<InBattle>();
+            }
+            if let Ok((entity, _, _)) = armies.get(battle.defender) {
+                commands.entity(entity).remove::<InBattle>();
+            }
+            continue;
+        };
+
+        // Calculate stats
+        fn calc_strength(comp: &ArmyComposition) -> u32 {
+            (comp.infantry as f32 * UnitType::Infantry.cost() * 0.1) as u32
+                + (comp.cavalry as f32 * UnitType::Cavalry.cost() * 0.1) as u32
+                + (comp.artillery as f32 * UnitType::Artillery.cost() * 0.1) as u32
+        }
+
+        // Basic damage formula: 10% of "cost" value?
+        // User asked: "damage based on its type".
+        // Let's use: Inf=1, Cav=2, Art=3 per unit.
+        fn calc_damage(comp: &ArmyComposition) -> u32 {
+            // Damage scaling:
+            // Infantry: 0.5 per man
+            // Cavalry: 1.0 per man
+            // Artillery: 2.0 per man
+            // With 10,000 inf => 5,000 damage score.
+
+            ((comp.infantry as f32 * 0.5)
+                + (comp.cavalry as f32 * 1.0)
+                + (comp.artillery as f32 * 2.0)) as u32
+        }
+
+        let mut rng = rand::rng();
+        // Random multiplier between 0.8 and 1.2
+        let att_roll: f32 = rng.random_range(0.8..1.2);
+        let def_roll: f32 = rng.random_range(0.8..1.2);
+
+        let att_dmg = (calc_damage(&attacker_comp) as f32 * att_roll) as u32;
+        let def_dmg = (calc_damage(&defender_comp) as f32 * def_roll) as u32;
+
+        // Apply casualties (simultaneous)
+        // Divide incoming damage score by a defense factor / toughness.
+        // Let's say damage score / 10 = men killed.
+        // 5,000 damage / 10 = 500 killed (5% of 10k).
+        fn apply_damage(comp: &mut ArmyComposition, damage: u32) -> u32 {
+            let units_lost = damage / 20; // 2.5% casualties per round approx base
+            let mut remaining_to_kill = units_lost;
+
+            // Ensure at least 1 kill if there is overwhelming damage but divide makes it 0 (unlikely with thousands)
+            // or if damage is decent but armies small.
+            // NEW: Always ensure some minimum damage if there is any damage at all, to prevent stalling.
+            if remaining_to_kill == 0 && damage > 0 {
+                remaining_to_kill = damage.min(MIN_DAMAGE).min(comp.total_size());
+            }
+
+            // Cap kills at total size (cannot kill more than exist)
+            let total = comp.total_size();
+            if remaining_to_kill > total {
+                remaining_to_kill = total;
+            }
+            // Ensure we kill at least 1 unit if units exist, to prevent infinite loops with micro armies (e.g. 5 vs 5)
+            if remaining_to_kill == 0 && total > 0 && damage > 0 {
+                remaining_to_kill = 1;
+            }
+
+            let actual_lost = remaining_to_kill;
+
+            // Distribute kills (Inf -> Cav -> Art)
+            // "Meat shield" logic
+            let kill_inf = remaining_to_kill.min(comp.infantry);
+            comp.infantry -= kill_inf;
+            remaining_to_kill -= kill_inf;
+
+            let kill_cav = remaining_to_kill.min(comp.cavalry);
+            comp.cavalry -= kill_cav;
+            remaining_to_kill -= kill_cav;
+
+            let kill_art = remaining_to_kill.min(comp.artillery);
+            comp.artillery -= kill_art;
+
+            actual_lost
+        }
+
+        let att_lost = apply_damage(&mut attacker_comp, def_dmg);
+        let def_lost = apply_damage(&mut defender_comp, att_dmg);
+
+        battle.last_damage_attacker = att_lost;
+        battle.last_damage_defender = def_lost;
+        battle.round += 1;
+
+        // Result check
+        let att_alive = attacker_comp.total_size() > 0;
+        let def_alive = defender_comp.total_size() > 0;
+
+        if !att_alive && !def_alive {
+            // Mutual destruction
+            info!(
+                "Battle at {:?} ended in mutual destruction",
+                battle.location
+            );
+            end_battle(
+                &mut commands,
+                battle_entity,
+                Entity::PLACEHOLDER,
+                Entity::PLACEHOLDER,
+                &mut army_hex_map,
+                &province_map,
+                &provinces,
+                Some(attacker_entity),
+                Some(defender_entity),
+            );
+        } else if !att_alive {
+            // Defender wins
+            info!(
+                "Defender {:?} won battle at {:?}",
+                defender_entity, battle.location
+            );
+            end_battle(
+                &mut commands,
+                battle_entity,
+                defender_entity,
+                attacker_entity,
+                &mut army_hex_map,
+                &province_map,
+                &provinces,
+                Some(attacker_entity),
+                None,
+            );
+        } else if !def_alive {
+            // Attacker wins
+            info!(
+                "Attacker {:?} won battle at {:?}",
+                attacker_entity, battle.location
+            );
+            // Attacker moves to tile? Or stays at previous?
+            // Usually attacker *moves into* the tile if they win.
+            // Defender was at `battle.location`. Attacker was at `attacker_pos` (neighbor).
+            // We should move attacker to `battle.location`.
+            army_hex_map.remove(&attacker_pos);
+            army_hex_map.insert(HexPos(battle.location), attacker_entity);
+            *attacker_pos = HexPos(battle.location);
+            commands
+                .entity(attacker_entity)
+                .insert(Transform::from_translation(
+                    battle.location.axial_to_world(consts::HEX_SIZE).extend(5.0),
+                ));
+
+            end_battle(
+                &mut commands,
+                battle_entity,
+                attacker_entity,
+                defender_entity,
+                &mut army_hex_map,
+                &province_map,
+                &provinces,
+                Some(defender_entity),
+                None,
+            );
+        } else {
+            // Battle continues
+            // Can add morale check here later
+        }
+    }
+}
+
+fn end_battle(
+    commands: &mut Commands,
+    battle_entity: Entity,
+    winner: Entity,
+    loser: Entity,
+    army_hex_map: &mut ArmyHexMap,
+    province_map: &ProvinceHexMap,
+    provinces: &Query<&Province>,
+    dead_entity_1: Option<Entity>,
+    dead_entity_2: Option<Entity>,
+) {
+    commands.entity(battle_entity).despawn();
+
+    // Despawn dead
+    if let Some(e) = dead_entity_1 {
+        if e != Entity::PLACEHOLDER {
+            if let Some(pos) = army_hex_map
+                .tiles
+                .iter()
+                .find_map(|(k, v)| if *v == e { Some(*k) } else { None })
+            {
+                army_hex_map.remove(&pos);
+            }
+            commands.entity(e).despawn();
+        }
+    }
+    if let Some(e) = dead_entity_2 {
+        if e != Entity::PLACEHOLDER && Some(e) != dead_entity_1 {
+            if let Some(pos) = army_hex_map
+                .tiles
+                .iter()
+                .find_map(|(k, v)| if *v == e { Some(*k) } else { None })
+            {
+                army_hex_map.remove(&pos);
+            }
+            commands.entity(e).despawn();
+        }
+    }
+
+    // Cleanup InBattle components for survivors
+    if winner != Entity::PLACEHOLDER
+        && Some(winner) != dead_entity_1
+        && Some(winner) != dead_entity_2
+    {
+        commands.entity(winner).remove::<InBattle>();
+    }
+    if loser != Entity::PLACEHOLDER && Some(loser) != dead_entity_1 && Some(loser) != dead_entity_2
+    {
+        commands.entity(loser).remove::<InBattle>();
+    }
 }

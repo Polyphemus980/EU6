@@ -157,7 +157,6 @@ pub(crate) struct SelectedRing {}
 #[derive(Component)]
 pub(crate) struct InBattle {
     pub(crate) battle_entity: Entity,
-    pub(crate) side: BattleSide,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -243,10 +242,10 @@ pub(crate) fn army_movement_system(
                     .neighbors()
                     .into_iter()
                     .filter(|n| {
-                        if let Some(&entity) = province_map.get_entity(n) {
-                            if let Ok(province) = provinces.get(entity) {
-                                return province.is_passable();
-                            }
+                        if let Some(&entity) = province_map.get_entity(n)
+                            && let Ok(province) = provinces.get(entity)
+                        {
+                            return province.is_passable();
                         }
                         false
                     })
@@ -325,13 +324,12 @@ pub(crate) fn move_active_armies(
         let battle_at_location: Option<Entity> = {
             let mut found = None;
             for (_, _, _, _, _, _, maybe_in_battle) in armies_query.iter() {
-                if let Some(in_battle) = maybe_in_battle {
-                    if let Ok(battle) = battles.get(in_battle.battle_entity) {
-                        if battle.location == next_hex {
-                            found = Some(in_battle.battle_entity);
-                            break;
-                        }
-                    }
+                if let Some(in_battle) = maybe_in_battle
+                    && let Ok(battle) = battles.get(in_battle.battle_entity)
+                    && battle.location == next_hex
+                {
+                    found = Some(in_battle.battle_entity);
+                    break;
                 }
             }
             found
@@ -339,65 +337,62 @@ pub(crate) fn move_active_armies(
 
         if let Some(battle_entity) = battle_at_location {
             // There's an ongoing battle - try to join it
-            if let Ok((_, _, owner, _, _, _, _)) = armies_query.get(entity) {
-                if let Ok(mut battle) = battles.get_mut(battle_entity) {
-                    let owner_entity = owner.0;
+            if let Ok((_, _, owner, _, _, _, _)) = armies_query.get(entity)
+                && let Ok(mut battle) = battles.get_mut(battle_entity)
+            {
+                let owner_entity = owner.0;
 
-                    // Determine which side to join
-                    let side = if owner_entity == battle.attacker_country {
-                        Some(BattleSide::Attacker)
-                    } else if owner_entity == battle.defender_country {
-                        Some(BattleSide::Defender)
-                    } else if crate::war::are_at_war(
-                        owner_entity,
-                        battle.defender_country,
-                        &war_relations,
-                    ) {
-                        // Allied with attacker (at war with defender)
-                        Some(BattleSide::Attacker)
-                    } else if crate::war::are_at_war(
-                        owner_entity,
-                        battle.attacker_country,
-                        &war_relations,
-                    ) {
-                        // Allied with defender (at war with attacker)
-                        Some(BattleSide::Defender)
-                    } else {
-                        None
-                    };
+                // Determine which side to join
+                let side = if owner_entity == battle.attacker_country {
+                    Some(BattleSide::Attacker)
+                } else if owner_entity == battle.defender_country {
+                    Some(BattleSide::Defender)
+                } else if crate::war::are_at_war(
+                    owner_entity,
+                    battle.defender_country,
+                    &war_relations,
+                ) {
+                    // Allied with attacker (at war with defender)
+                    Some(BattleSide::Attacker)
+                } else if crate::war::are_at_war(
+                    owner_entity,
+                    battle.attacker_country,
+                    &war_relations,
+                ) {
+                    // Allied with defender (at war with attacker)
+                    Some(BattleSide::Defender)
+                } else {
+                    None
+                };
 
-                    if let Some(side) = side {
-                        info!(
-                            "Army {:?} joins battle at {:?} on {:?} side",
-                            entity, next_hex, side
-                        );
+                if let Some(side) = side {
+                    info!(
+                        "Army {:?} joins battle at {:?} on {:?} side",
+                        entity, next_hex, side
+                    );
 
-                        // Add to battle
-                        match side {
-                            BattleSide::Attacker => battle.attackers.push(entity),
-                            BattleSide::Defender => battle.defenders.push(entity),
-                        }
-
-                        // Mark army as in battle
-                        commands.entity(entity).remove::<ActivePath>();
-                        commands.entity(entity).insert(InBattle {
-                            battle_entity,
-                            side,
-                        });
-
-                        // Move army to battle location
-                        army_hex_map.remove(&old_pos);
-                        // Don't insert into hex map - battle location is shared
-                        if let Ok((_, mut transform, _, _, mut pos, _, _)) =
-                            armies_query.get_mut(entity)
-                        {
-                            *pos = next_pos;
-                            transform.translation =
-                                next_hex.axial_to_world(consts::HEX_SIZE).extend(5.0);
-                        }
-
-                        continue;
+                    // Add to battle
+                    match side {
+                        BattleSide::Attacker => battle.attackers.push(entity),
+                        BattleSide::Defender => battle.defenders.push(entity),
                     }
+
+                    // Mark army as in battle
+                    commands.entity(entity).remove::<ActivePath>();
+                    commands.entity(entity).insert(InBattle { battle_entity });
+
+                    // Move army to battle location
+                    army_hex_map.remove(&old_pos);
+                    // Don't insert into hex map - battle location is shared
+                    if let Ok((_, mut transform, _, _, mut pos, _, _)) =
+                        armies_query.get_mut(entity)
+                    {
+                        *pos = next_pos;
+                        transform.translation =
+                            next_hex.axial_to_world(consts::HEX_SIZE).extend(5.0);
+                    }
+
+                    continue;
                 }
             }
         }
@@ -469,11 +464,9 @@ pub(crate) fn move_active_armies(
                     // Mark armies with their side
                     commands.entity(e1).insert(InBattle {
                         battle_entity: battle_id,
-                        side: BattleSide::Attacker,
                     });
                     commands.entity(e2).insert(InBattle {
                         battle_entity: battle_id,
-                        side: BattleSide::Defender,
                     });
 
                     continue;
@@ -622,7 +615,7 @@ pub(crate) fn spawn_initial_armies(
                 ArmyComposition {
                     infantry: 10 * REGIMENT_SIZE,
                     cavalry: 2 * REGIMENT_SIZE,
-                    artillery: 1 * REGIMENT_SIZE,
+                    artillery: REGIMENT_SIZE,
                 },
             );
             army_hex_map.insert(HexPos(start_hex), army);
@@ -697,7 +690,7 @@ pub(crate) fn handle_army_interaction_changed(
 
 pub(crate) fn handle_army_composition_changed(
     army_query: Query<(&ArmyComposition, &Children), (With<Army>, Changed<ArmyComposition>)>,
-    mut label_query: Query<(&mut ArmyLabel, &mut Text2d)>, // Query both ArmyLabel and Text2d
+    mut label_query: Query<(&mut ArmyLabel, &mut Text2d)>,
 ) {
     for (composition, children) in &army_query {
         for &child in children {
@@ -1136,17 +1129,17 @@ pub(crate) fn resolve_battles(
         // Remove dead armies from hex map and despawn
         let mut to_despawn = Vec::new();
         for &army_entity in battle.attackers.iter().chain(battle.defenders.iter()) {
-            if let Ok((_, comp, _, _)) = armies.get(army_entity) {
-                if comp.total_size() == 0 {
-                    if let Some(pos) = army_hex_map
-                        .tiles
-                        .iter()
-                        .find_map(|(k, v)| if *v == army_entity { Some(*k) } else { None })
-                    {
-                        army_hex_map.remove(&pos);
-                    }
-                    to_despawn.push(army_entity);
+            if let Ok((_, comp, _, _)) = armies.get(army_entity)
+                && comp.total_size() == 0
+            {
+                if let Some(pos) = army_hex_map
+                    .tiles
+                    .iter()
+                    .find_map(|(k, v)| if *v == army_entity { Some(*k) } else { None })
+                {
+                    army_hex_map.remove(&pos);
                 }
+                to_despawn.push(army_entity);
             }
         }
         for army_entity in to_despawn {
@@ -1236,7 +1229,7 @@ fn end_battle_multi(
         // Move winner to battle location
         if let Ok((_, _, mut pos, _)) = armies.get_mut(army_entity) {
             // First remove from old position
-            army_hex_map.remove(&*pos);
+            army_hex_map.remove(&pos);
             *pos = HexPos(battle_location);
             commands
                 .entity(army_entity)
@@ -1256,12 +1249,12 @@ fn end_battle_multi(
     }
 
     // Occupy province if attackers won
-    if winner_side == BattleSide::Attacker {
-        if let Some(&province_entity) = province_map.get_entity(&battle_location) {
-            if let Ok((province, owner)) = provinces.get(province_entity) {
-                if province.is_ownable() && owner.0 != winner_country {
-                    crate::war::occupy_province(commands, province_entity, winner_country);
-                }
+    if winner_side == BattleSide::Attacker
+        && let Some(&province_entity) = province_map.get_entity(&battle_location)
+    {
+        if let Ok((province, owner)) = provinces.get(province_entity) {
+            if province.is_ownable() && owner.0 != winner_country {
+                crate::war::occupy_province(commands, province_entity, winner_country);
             }
         }
     }

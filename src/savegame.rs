@@ -172,7 +172,6 @@ fn handle_load_game(
     mut turn: ResMut<Turn>,
     mut player: ResMut<Player>,
     countries: Query<(Entity, &DisplayName, &MapColor), With<Country>>,
-    provinces: Query<(Entity, &Province)>,
     armies: Query<Entity, With<Army>>,
     mut army_hex_map: ResMut<ArmyHexMap>,
     mut wars: ResMut<Wars>,
@@ -230,18 +229,18 @@ fn handle_load_game(
                 commands.entity(prov_entity).remove::<Owner>();
                 commands.entity(prov_entity).remove::<Occupied>();
 
-                if let Some(owner_name) = &prov_save.owner {
-                    if let Some(&owner_entity) = country_lookup.get(owner_name) {
-                        commands.entity(prov_entity).insert(Owner(owner_entity));
-                    }
+                if let Some(owner_name) = &prov_save.owner
+                    && let Some(&owner_entity) = country_lookup.get(owner_name)
+                {
+                    commands.entity(prov_entity).insert(Owner(owner_entity));
                 }
 
-                if let Some(occupier_name) = &prov_save.occupier {
-                    if let Some(&occupier_entity) = country_lookup.get(occupier_name) {
-                        commands.entity(prov_entity).insert(Occupied {
-                            occupier: occupier_entity,
-                        });
-                    }
+                if let Some(occupier_name) = &prov_save.occupier
+                    && let Some(&occupier_entity) = country_lookup.get(occupier_name)
+                {
+                    commands.entity(prov_entity).insert(Occupied {
+                        occupier: occupier_entity,
+                    });
                 }
             }
         }
@@ -291,13 +290,7 @@ fn handle_load_game(
                 country_lookup.get(&war_save.attacker),
                 country_lookup.get(&war_save.defender),
             ) {
-                let war_entity = commands
-                    .spawn(War {
-                        attacker,
-                        defender,
-                        started_turn: 0,
-                    })
-                    .id();
+                let war_entity = commands.spawn(War { attacker, defender }).id();
                 wars.active_wars.push(war_entity);
 
                 commands.entity(attacker).insert(WarRelations {

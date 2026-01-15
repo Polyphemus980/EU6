@@ -79,7 +79,7 @@ pub(crate) fn update_siege_progress(
     }
 
     // Check for new sieges - armies standing on enemy provinces
-    for (army_entity, army_pos, army_owner) in armies.iter() {
+    for (_, army_pos, army_owner) in armies.iter() {
         if let Some(&province_entity) = province_hex_map.get_entity(&army_pos.0) {
             // Skip if province already has siege or is occupied
             if siege_provinces.get(province_entity).is_ok() {
@@ -91,7 +91,6 @@ pub(crate) fn update_siege_progress(
                 if are_at_war(army_owner.0, province_owner.0, &war_relations) {
                     // Start siege
                     commands.entity(province_entity).insert(SiegeProgress {
-                        besieger: army_entity,
                         besieger_country: army_owner.0,
                         progress: 1, // First turn counts
                     });
@@ -107,7 +106,6 @@ pub(crate) fn update_siege_progress(
 pub(crate) struct War {
     pub(crate) attacker: Entity,
     pub(crate) defender: Entity,
-    pub(crate) started_turn: u32,
 }
 
 /// Resource tracking all active wars
@@ -157,7 +155,6 @@ pub(crate) struct Occupied {
 /// When progress reaches threshold, the province becomes occupied.
 #[derive(Component)]
 pub(crate) struct SiegeProgress {
-    pub(crate) besieger: Entity,
     pub(crate) besieger_country: Entity,
     pub(crate) progress: u32,
 }
@@ -221,12 +218,11 @@ pub(crate) fn get_war_between(
     war_query: &Query<(Entity, &War)>,
 ) -> Option<Entity> {
     for &war_entity in &wars.active_wars {
-        if let Ok((_, war)) = war_query.get(war_entity) {
-            if (war.attacker == country1 && war.defender == country2)
-                || (war.attacker == country2 && war.defender == country1)
-            {
-                return Some(war_entity);
-            }
+        if let Ok((_, war)) = war_query.get(war_entity)
+            && ((war.attacker == country1 && war.defender == country2)
+                || (war.attacker == country2 && war.defender == country1))
+        {
+            return Some(war_entity);
         }
     }
     None
@@ -240,27 +236,11 @@ pub(crate) fn occupy_province(commands: &mut Commands, province_entity: Entity, 
     info!("Province {:?} occupied by {:?}", province_entity, occupier);
 }
 
-/// Get all provinces occupied by a country from an enemy
-pub(crate) fn get_occupied_provinces(
-    occupier: Entity,
-    enemy: Entity,
-    provinces: &Query<(Entity, &Owner, Option<&Occupied>), With<Province>>,
-) -> Vec<Entity> {
-    provinces
-        .iter()
-        .filter(|(_, owner, occupied)| {
-            owner.0 == enemy && occupied.map(|o| o.occupier == occupier).unwrap_or(false)
-        })
-        .map(|(e, _, _)| e)
-        .collect()
-}
-
 fn handle_declare_war(
     mut commands: Commands,
     mut events: MessageReader<DeclareWarEvent>,
     mut wars: ResMut<Wars>,
     mut war_relations: Query<&mut WarRelations>,
-    turn: Res<crate::turns::Turn>,
 ) {
     for event in events.read() {
         // Cannot declare war on yourself
@@ -270,14 +250,14 @@ fn handle_declare_war(
         }
 
         // Check if already at war
-        if let Ok(relations) = war_relations.get(event.attacker) {
-            if relations.is_at_war_with(event.defender) {
-                info!(
-                    "Countries {:?} and {:?} are already at war",
-                    event.attacker, event.defender
-                );
-                continue;
-            }
+        if let Ok(relations) = war_relations.get(event.attacker)
+            && relations.is_at_war_with(event.defender)
+        {
+            info!(
+                "Countries {:?} and {:?} are already at war",
+                event.attacker, event.defender
+            );
+            continue;
         }
 
         // Create war entity
@@ -285,7 +265,6 @@ fn handle_declare_war(
             .spawn(War {
                 attacker: event.attacker,
                 defender: event.defender,
-                started_turn: turn.current_turn(),
             })
             .id();
 
@@ -641,18 +620,17 @@ pub(crate) fn draw_diplomacy_tab(
 
         ui.add_space(8.0);
 
-        if ui.button("📜 Offer Peace").clicked() {
-            if let Some(war_entity) =
+        if ui.button("📜 Offer Peace").clicked()
+            && let Some(war_entity) =
                 get_war_between(player_country, target_country, wars, war_query)
-            {
-                peace_offer_events.write(PeaceOfferEvent {
-                    from: player_country,
-                    to: target_country,
-                    war_entity,
-                    provinces_to_cede: selected_provinces.iter().copied().collect(),
-                });
-                selected_provinces.clear();
-            }
+        {
+            peace_offer_events.write(PeaceOfferEvent {
+                from: player_country,
+                to: target_country,
+                war_entity,
+                provinces_to_cede: selected_provinces.iter().copied().collect(),
+            });
+            selected_provinces.clear();
         }
     } else {
         ui.label(RichText::new("☮ AT PEACE").color(Color32::GREEN).strong());

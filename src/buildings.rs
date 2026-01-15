@@ -74,9 +74,6 @@ pub(crate) struct Building {
     pub(crate) building_type: BuildingType,
 }
 
-#[derive(Component)]
-pub(crate) struct Cost(f32);
-
 /// Component representing income from a single source. Can be added to provinces, building, ....
 #[derive(Component)]
 pub(crate) struct Income(f32);

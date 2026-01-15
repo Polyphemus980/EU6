@@ -1,5 +1,5 @@
 ﻿use crate::egui_common;
-use crate::map::{MapData, Owner, Province, ProvinceHexMap};
+use crate::map::{MapData, Owner, Province};
 use crate::menu::MenuState;
 use crate::player::Player;
 use crate::war::{
@@ -303,13 +303,12 @@ pub(crate) fn display_country_panel(
                 {
                     *current_tab = CountryTab::Info;
                 }
-                if show_diplomacy {
-                    if ui
+                if show_diplomacy
+                    && ui
                         .selectable_label(*current_tab == CountryTab::Diplomacy, "⚔ Diplomacy")
                         .clicked()
-                    {
-                        *current_tab = CountryTab::Diplomacy;
-                    }
+                {
+                    *current_tab = CountryTab::Diplomacy;
                 }
             });
 

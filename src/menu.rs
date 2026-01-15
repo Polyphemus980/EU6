@@ -256,7 +256,9 @@ fn display_pause_menu(
     egui::Area::new(egui::Id::new("pause_overlay"))
         .fixed_pos(egui::pos2(0.0, 0.0))
         .show(ctx, |ui| {
-            let screen_rect = ui.ctx().screen_rect();
+            let screen_rect = ui
+                .ctx()
+                .input(|i| i.viewport().inner_rect.unwrap_or(egui::Rect::NOTHING));
             ui.painter().rect_filled(
                 screen_rect,
                 0.0,

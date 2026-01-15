@@ -20,6 +20,10 @@ impl Plugin for TurnsPlugin {
                 crate::army::move_active_armies,
             )
             .add_systems(OnEnter(GameState::Processing), crate::army::resolve_battles)
+            .add_systems(
+                OnEnter(GameState::Processing),
+                crate::war::update_siege_progress.after(crate::army::move_active_armies),
+            )
             .add_systems(EguiPrimaryContextPass, display_turn_button);
     }
 }
@@ -33,6 +37,10 @@ pub(crate) struct Turn {
 impl Turn {
     pub(crate) fn advance(&mut self) {
         self.current_turn += 1;
+    }
+
+    pub(crate) fn current_turn(&self) -> u32 {
+        self.current_turn
     }
 }
 

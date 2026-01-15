@@ -8,6 +8,7 @@ mod layout;
 mod map;
 mod player;
 mod turns;
+mod war;
 
 use crate::army::ArmyPlugin;
 use crate::country::CountryPlugin;
@@ -15,6 +16,7 @@ use crate::layout::LayoutPlugin;
 use crate::map::MapPlugin;
 use crate::player::PlayerPlugin;
 use crate::turns::TurnsPlugin;
+use crate::war::WarPlugin;
 use bevy::log::{Level, LogPlugin};
 use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
@@ -34,6 +36,7 @@ fn main() {
             LayoutPlugin,
             TurnsPlugin,
             PlayerPlugin,
+            WarPlugin,
         ))
         .add_systems(Startup, setup_camera)
         .run();

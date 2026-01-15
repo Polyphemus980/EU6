@@ -1,9 +1,13 @@
 ﻿use crate::egui_common;
 use crate::map::{Owner, Province};
 use crate::player::Player;
+use crate::war::{
+    draw_diplomacy_tab, DeclareWarEvent, Occupied, PeaceOfferEvent, War, WarRelations, Wars,
+};
 use bevy::prelude::*;
 use bevy_egui::egui::{Color32, RichText};
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
+use std::collections::HashSet;
 
 pub struct CountryPlugin;
 
@@ -169,72 +173,141 @@ pub(crate) fn assign_province_ownership(
     }
 }
 
+/// Enum for country panel tabs
+#[derive(Default, PartialEq, Clone, Copy)]
+pub(crate) enum CountryTab {
+    #[default]
+    Info,
+    Diplomacy,
+}
+
 pub(crate) fn display_country_panel(
     mut contexts: EguiContexts,
     mut selected_country: ResMut<SelectedCountry>,
-    countries: Query<(&DisplayName, &Coffer, &MapColor), With<Country>>,
+    countries: Query<(Entity, &DisplayName, &Coffer, &MapColor), With<Country>>,
     player: Res<Player>,
+    war_relations: Query<&WarRelations>,
+    wars: Res<Wars>,
+    war_query: Query<(Entity, &War)>,
+    mut declare_war_events: MessageWriter<DeclareWarEvent>,
+    mut peace_offer_events: MessageWriter<PeaceOfferEvent>,
+    provinces: Query<(Entity, &Province, &Owner, Option<&Occupied>)>,
+    mut current_tab: Local<CountryTab>,
+    mut selected_provinces_for_peace: Local<HashSet<Entity>>,
 ) {
     let country = match selected_country.get() {
         Some(entity) => entity,
-        None => return,
+        None => {
+            // Clear selected provinces when no country selected
+            selected_provinces_for_peace.clear();
+            return;
+        }
     };
 
-    if let Ok((name, coffer, color)) = countries.get(country) {
-        let is_player = Some(country) == player.country;
+    let Ok((country_entity, name, coffer, color)) = countries.get(country) else {
+        return;
+    };
 
-        let ctx = match contexts.ctx_mut() {
-            Ok(c) => c,
-            Err(_) => return,
-        };
+    let is_player = Some(country) == player.country;
+    let player_country = player.country;
 
-        let country_frame = egui_common::default_frame();
+    let ctx = match contexts.ctx_mut() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
 
-        egui::Window::new("Country")
-            .frame(country_frame)
-            .title_bar(false)
-            .anchor(egui::Align2::RIGHT_TOP, [-20.0, 20.0])
-            .resizable(false)
-            .default_width(250.0)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
+    let country_frame = egui_common::default_frame();
+
+    egui::Window::new("Country")
+        .frame(country_frame)
+        .title_bar(false)
+        .anchor(egui::Align2::RIGHT_TOP, [-20.0, 20.0])
+        .resizable(false)
+        .default_width(280.0)
+        .show(ctx, |ui| {
+            // Header
+            ui.horizontal(|ui| {
+                ui.add(egui::Label::new(
+                    RichText::new(&name.0)
+                        .font(egui::FontId::proportional(22.0))
+                        .color(Color32::WHITE)
+                        .strong(),
+                ));
+
+                if is_player {
                     ui.add(egui::Label::new(
-                        RichText::new(&name.0)
-                            .font(egui::FontId::proportional(22.0))
-                            .color(Color32::WHITE)
-                            .strong(),
+                        RichText::new("(You)").color(Color32::GREEN).italics(),
                     ));
+                }
 
-                    if is_player {
-                        ui.add(egui::Label::new(
-                            RichText::new("(You)").color(Color32::GREEN).italics(),
-                        ));
-                    }
-
-                    ui.add_space(8.0);
-
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if egui_common::close_button(ui) {
                         selected_country.clear();
+                        selected_provinces_for_peace.clear();
                     }
                 });
-
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(12.0);
-
-                egui::Grid::new("country_stats")
-                    .num_columns(2)
-                    .spacing([20.0, 8.0])
-                    .show(ui, |ui| {
-                        ui.label(RichText::new("Treasury").color(Color32::LIGHT_GRAY));
-                        ui.label(RichText::new(format!("{:.2}g", coffer.0)).color(Color32::GOLD));
-                        ui.end_row();
-
-                        ui.label(RichText::new("Map Color").color(Color32::LIGHT_GRAY));
-                        let [r, g, b] = color.0.to_srgba().to_f32_array_no_alpha();
-                        ui.color_edit_button_rgb(&mut [r, g, b]);
-                        ui.end_row();
-                    });
             });
-    }
+
+            ui.add_space(8.0);
+            ui.separator();
+
+            // Tabs - only show Diplomacy tab if viewing another country as player
+            let show_diplomacy = !is_player && player_country.is_some();
+
+            ui.horizontal(|ui| {
+                if ui
+                    .selectable_label(*current_tab == CountryTab::Info, "📊 Info")
+                    .clicked()
+                {
+                    *current_tab = CountryTab::Info;
+                }
+                if show_diplomacy {
+                    if ui
+                        .selectable_label(*current_tab == CountryTab::Diplomacy, "⚔ Diplomacy")
+                        .clicked()
+                    {
+                        *current_tab = CountryTab::Diplomacy;
+                    }
+                }
+            });
+
+            ui.separator();
+            ui.add_space(8.0);
+
+            match *current_tab {
+                CountryTab::Info => {
+                    egui::Grid::new("country_stats")
+                        .num_columns(2)
+                        .spacing([20.0, 8.0])
+                        .show(ui, |ui| {
+                            ui.label(RichText::new("Treasury").color(Color32::LIGHT_GRAY));
+                            ui.label(
+                                RichText::new(format!("{:.2}g", coffer.0)).color(Color32::GOLD),
+                            );
+                            ui.end_row();
+
+                            ui.label(RichText::new("Map Color").color(Color32::LIGHT_GRAY));
+                            let [r, g, b] = color.0.to_srgba().to_f32_array_no_alpha();
+                            ui.color_edit_button_rgb(&mut [r, g, b]);
+                            ui.end_row();
+                        });
+                }
+                CountryTab::Diplomacy => {
+                    if let Some(player_country) = player_country {
+                        draw_diplomacy_tab(
+                            ui,
+                            player_country,
+                            country_entity,
+                            &war_relations,
+                            &wars,
+                            &war_query,
+                            &mut declare_war_events,
+                            &mut peace_offer_events,
+                            &provinces,
+                            &mut selected_provinces_for_peace,
+                        );
+                    }
+                }
+            }
+        });
 }

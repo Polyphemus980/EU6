@@ -269,6 +269,7 @@ pub(crate) fn move_active_armies(
         With<Army>,
     >,
     mut selected_army: ResMut<SelectedArmy>,
+    war_relations: Query<&crate::war::WarRelations>,
 ) {
     let movers: Vec<Entity> = armies_query
         .iter()
@@ -318,6 +319,19 @@ pub(crate) fn move_active_armies(
 
                     continue;
                 } else {
+                    // Check if countries are at war before starting combat
+                    let are_at_war = crate::war::are_at_war(owner1.0, owner2.0, &war_relations);
+
+                    if !are_at_war {
+                        // Not at war - cannot attack, stop movement
+                        info!(
+                            "Cannot attack: {:?} and {:?} are not at war",
+                            owner1.0, owner2.0
+                        );
+                        commands.entity(e1).remove::<ActivePath>();
+                        continue;
+                    }
+
                     // COMBAT START
                     info!(
                         "Battle started between {:?} (attacker) and {:?} (defender) at {:?}",
@@ -775,47 +789,48 @@ pub(crate) fn display_battle_panel(
 pub(crate) fn resolve_battles(
     mut commands: Commands,
     mut battles: Query<(Entity, &mut Battle)>,
-    mut armies: Query<(Entity, &mut ArmyComposition, &mut HexPos)>,
+    mut armies: Query<(Entity, &mut ArmyComposition, &mut HexPos, &Owner)>,
     mut army_hex_map: ResMut<ArmyHexMap>,
     province_map: Res<ProvinceHexMap>,
-    provinces: Query<&Province>,
+    provinces: Query<(&Province, &Owner)>,
 ) {
     for (battle_entity, mut battle) in battles.iter_mut() {
         // Collect participants
-        let (mut attacker_comp, mut attacker_pos) =
-            if let Ok((_, c, p)) = armies.get_mut(battle.attacker) {
-                (c, p)
-            } else {
-                // Attacker missing (despawned?), defender wins by default
-                end_battle(
-                    &mut commands,
-                    battle_entity,
-                    battle.defender,
-                    battle.attacker,
-                    &mut army_hex_map,
-                    &province_map,
-                    &provinces,
-                    None,
-                    None,
-                );
-                continue;
-            };
+        let attacker_owner = if let Ok((_, _, _, o)) = armies.get_mut(battle.attacker) {
+            o.0
+        } else {
+            // Attacker missing (despawned?), defender wins by default
+            end_battle(
+                &mut commands,
+                battle_entity,
+                battle.defender,
+                battle.attacker,
+                &mut army_hex_map,
+                &province_map,
+                &provinces,
+                None,
+                None,
+                None, // No winner owner for province capture
+                battle.location,
+            );
+            continue;
+        };
 
         // Re-query needed because get_mut borrows exclusive
         // Actually we need get_many_mut
         let Ok(
             [
-                (attacker_entity, mut attacker_comp, mut attacker_pos),
-                (defender_entity, mut defender_comp, mut defender_pos),
+                (attacker_entity, mut attacker_comp, mut attacker_pos, attacker_owner_component),
+                (defender_entity, mut defender_comp, mut defender_pos, _defender_owner_component),
             ],
         ) = armies.get_many_mut([battle.attacker, battle.defender])
         else {
             // Someone missing
             commands.entity(battle_entity).despawn();
-            if let Ok((entity, _, _)) = armies.get(battle.attacker) {
+            if let Ok((entity, _, _, _)) = armies.get(battle.attacker) {
                 commands.entity(entity).remove::<InBattle>();
             }
-            if let Ok((entity, _, _)) = armies.get(battle.defender) {
+            if let Ok((entity, _, _, _)) = armies.get(battle.defender) {
                 commands.entity(entity).remove::<InBattle>();
             }
             continue;
@@ -905,6 +920,8 @@ pub(crate) fn resolve_battles(
         let att_alive = attacker_comp.total_size() > 0;
         let def_alive = defender_comp.total_size() > 0;
 
+        let attacker_owner = attacker_owner_component.0;
+
         if !att_alive && !def_alive {
             // Mutual destruction
             info!(
@@ -921,9 +938,11 @@ pub(crate) fn resolve_battles(
                 &provinces,
                 Some(attacker_entity),
                 Some(defender_entity),
+                None, // No winner for province capture
+                battle.location,
             );
         } else if !att_alive {
-            // Defender wins
+            // Defender wins - defender keeps the province
             info!(
                 "Defender {:?} won battle at {:?}",
                 defender_entity, battle.location
@@ -938,9 +957,11 @@ pub(crate) fn resolve_battles(
                 &provinces,
                 Some(attacker_entity),
                 None,
+                None, // Defender wins, province stays
+                battle.location,
             );
         } else if !def_alive {
-            // Attacker wins
+            // Attacker wins - capture the province!
             info!(
                 "Attacker {:?} won battle at {:?}",
                 attacker_entity, battle.location
@@ -968,6 +989,8 @@ pub(crate) fn resolve_battles(
                 &provinces,
                 Some(defender_entity),
                 None,
+                Some(attacker_owner), // Attacker captures province
+                battle.location,
             );
         } else {
             // Battle continues
@@ -983,11 +1006,25 @@ fn end_battle(
     loser: Entity,
     army_hex_map: &mut ArmyHexMap,
     province_map: &ProvinceHexMap,
-    provinces: &Query<&Province>,
+    provinces: &Query<(&Province, &Owner)>,
     dead_entity_1: Option<Entity>,
     dead_entity_2: Option<Entity>,
+    winner_owner: Option<Entity>, // The country that should occupy the province
+    battle_location: Hex,
 ) {
     commands.entity(battle_entity).despawn();
+
+    // Occupy province if attacker won (EU4-style - occupation, not ownership change)
+    if let Some(occupier) = winner_owner {
+        if let Some(&province_entity) = province_map.get_entity(&battle_location) {
+            if let Ok((province, owner)) = provinces.get(province_entity) {
+                // Only occupy if province is ownable and belongs to enemy
+                if province.is_ownable() && owner.0 != occupier {
+                    crate::war::occupy_province(commands, province_entity, occupier);
+                }
+            }
+        }
+    }
 
     // Despawn dead
     if let Some(e) = dead_entity_1 {

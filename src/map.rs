@@ -101,6 +101,11 @@ impl Province {
         self.terrain.color()
     }
 
+    /// Returns the name of the province.
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
     /// Returns a reference to the hex coordinates of the province.
     pub(crate) fn get_hex(&self) -> &Hex {
         &self.hex
@@ -350,6 +355,8 @@ pub(crate) fn update_province_colors(
     query: Query<(
         &Province,
         Option<&Owner>,
+        Option<&crate::war::Occupied>,
+        Option<&crate::war::SiegeProgress>,
         &MeshMaterial2d<ColorMaterial>,
         &InteractionState,
     )>,
@@ -357,21 +364,39 @@ pub(crate) fn update_province_colors(
 ) {
     let selection_mix = 0.4;
     let selection_color = Color::srgb(1.0, 0.9, 0.0);
+    let occupation_mix = 0.5; // How much occupier color shows
+    let siege_color = Color::srgb(0.3, 0.0, 0.0); // Dark red tint for sieges
+    let siege_mix = 0.3;
 
-    for (province, maybe_owner, material, state) in &query {
+    for (province, maybe_owner, maybe_occupied, maybe_siege, material, state) in &query {
         if let Some(mat) = materials.get_mut(&material.0) {
-            let base_color = match *map_mode {
+            let mut base_color = match *map_mode {
                 MapMode::Terrain => province.color(),
                 MapMode::Political => {
                     if let Some(owner) = maybe_owner
                         && let Ok(map_color) = country_query.get(owner.0)
                     {
-                        map_color.0
+                        let owner_color = map_color.0;
+
+                        // If occupied, blend with occupier's color
+                        if let Some(occupied) = maybe_occupied
+                            && let Ok(occupier_color) = country_query.get(occupied.occupier)
+                        {
+                            // Mix owner color with occupier color to show occupation
+                            owner_color.mix(&occupier_color.0, occupation_mix)
+                        } else {
+                            owner_color
+                        }
                     } else {
                         province.color()
                     }
                 }
             };
+
+            // Apply siege visual effect (dark tint)
+            if maybe_siege.is_some() {
+                base_color = base_color.mix(&siege_color, siege_mix);
+            }
 
             mat.color = match *state {
                 InteractionState::Selected => base_color.mix(&selection_color, selection_mix),
@@ -393,7 +418,13 @@ pub(crate) fn display_province_panel(
     mut contexts: EguiContexts,
     mut selected_province: ResMut<SelectedProvince>,
     mut selected_country: ResMut<SelectedCountry>,
-    provinces: Query<(&Province, Option<&Owner>, Option<&Children>)>,
+    provinces: Query<(
+        &Province,
+        Option<&Owner>,
+        Option<&Children>,
+        Option<&crate::war::Occupied>,
+        Option<&crate::war::SiegeProgress>,
+    )>,
     countries: Query<(&DisplayName, &MapColor)>,
     buildings: Query<&Building>,
     mut coffers: Query<&mut Coffer>,
@@ -407,7 +438,9 @@ pub(crate) fn display_province_panel(
     let Some(selected_id) = selected_province.get() else {
         return;
     };
-    let Ok((province, maybe_owner, maybe_children)) = provinces.get(selected_id) else {
+    let Ok((province, maybe_owner, maybe_children, maybe_occupied, maybe_siege)) =
+        provinces.get(selected_id)
+    else {
         return;
     };
 
@@ -676,6 +709,39 @@ pub(crate) fn display_province_panel(
                                 RichText::new(province.terrain.to_string()).color(Color32::WHITE),
                             );
                             ui.end_row();
+
+                            // Show occupation status
+                            if let Some(occupied) = maybe_occupied {
+                                ui.label(RichText::new("Status").color(Color32::LIGHT_GRAY));
+                                let occupier_name = countries
+                                    .get(occupied.occupier)
+                                    .map(|(n, _)| n.0.as_str())
+                                    .unwrap_or("Unknown");
+                                ui.label(
+                                    RichText::new(format!("⚔ Occupied by {}", occupier_name))
+                                        .color(Color32::RED),
+                                );
+                                ui.end_row();
+                            }
+
+                            // Show siege progress
+                            if let Some(siege) = maybe_siege {
+                                ui.label(RichText::new("Siege").color(Color32::LIGHT_GRAY));
+                                let besieger_name = countries
+                                    .get(siege.besieger_country)
+                                    .map(|(n, _)| n.0.as_str())
+                                    .unwrap_or("Unknown");
+                                ui.label(
+                                    RichText::new(format!(
+                                        "🏰 Under siege by {} ({}/{})",
+                                        besieger_name,
+                                        siege.progress,
+                                        crate::war::SIEGE_TURNS_REQUIRED
+                                    ))
+                                    .color(Color32::YELLOW),
+                                );
+                                ui.end_row();
+                            }
                         });
                 }
             }

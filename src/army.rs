@@ -301,196 +301,377 @@ pub(crate) fn move_active_armies(
 ) {
     let movers: Vec<Entity> = armies_query
         .iter()
-        .filter_map(|(e, _, _, _, _, path, _)| if path.is_some() { Some(e) } else { None })
+        .filter_map(|(e, _, _, _, _, path, _)| path.is_some().then_some(e))
         .collect();
 
     for entity in movers {
-        let (next_hex, old_pos) = {
-            if let Ok((_, _, _, _, pos, Some(active_path), _)) = armies_query.get(entity) {
-                if let Some(h) = active_path.path.front() {
-                    (*h, *pos)
-                } else {
-                    commands.entity(entity).remove::<ActivePath>();
-                    continue;
-                }
-            } else {
-                continue;
-            }
-        };
+        process_army_movement(
+            &mut commands,
+            &mut army_hex_map,
+            &mut armies_query,
+            &mut selected_army,
+            &war_relations,
+            &mut battles,
+            entity,
+        );
+    }
+}
 
-        let next_pos = HexPos(next_hex);
+fn process_army_movement(
+    commands: &mut Commands,
+    army_hex_map: &mut ResMut<ArmyHexMap>,
+    armies_query: &mut Query<
+        (
+            Entity,
+            &mut Transform,
+            &Owner,
+            &mut ArmyComposition,
+            &mut HexPos,
+            Option<&mut ActivePath>,
+            Option<&InBattle>,
+        ),
+        With<Army>,
+    >,
+    selected_army: &mut ResMut<SelectedArmy>,
+    war_relations: &Query<&crate::war::WarRelations>,
+    battles: &mut Query<&mut Battle>,
+    entity: Entity,
+) {
+    let Some((next_hex, old_pos)) = get_next_move(armies_query, commands, entity) else {
+        return;
+    };
+    let next_pos = HexPos(next_hex);
 
-        // Find battle at location properly
-        let battle_at_location: Option<Entity> = {
-            let mut found = None;
-            for (_, _, _, _, _, _, maybe_in_battle) in armies_query.iter() {
-                if let Some(in_battle) = maybe_in_battle
-                    && let Ok(battle) = battles.get(in_battle.battle_entity)
-                    && battle.location == next_hex
-                {
-                    found = Some(in_battle.battle_entity);
-                    break;
-                }
-            }
-            found
-        };
+    if try_join_battle(
+        commands,
+        army_hex_map,
+        armies_query,
+        war_relations,
+        battles,
+        entity,
+        next_hex,
+        old_pos,
+    ) {
+        return;
+    }
 
-        if let Some(battle_entity) = battle_at_location {
-            // There's an ongoing battle - try to join it
-            if let Ok((_, _, owner, _, _, _, _)) = armies_query.get(entity)
-                && let Ok(mut battle) = battles.get_mut(battle_entity)
-            {
-                let owner_entity = owner.0;
+    if try_handle_collision(
+        commands,
+        army_hex_map,
+        armies_query,
+        selected_army,
+        war_relations,
+        entity,
+        next_hex,
+        next_pos,
+        old_pos,
+    ) {
+        return;
+    }
 
-                // Determine which side to join
-                let side = if owner_entity == battle.attacker_country {
-                    Some(BattleSide::Attacker)
-                } else if owner_entity == battle.defender_country {
-                    Some(BattleSide::Defender)
-                } else if crate::war::are_at_war(
-                    owner_entity,
-                    battle.defender_country,
-                    &war_relations,
-                ) {
-                    // Allied with attacker (at war with defender)
-                    Some(BattleSide::Attacker)
-                } else if crate::war::are_at_war(
-                    owner_entity,
-                    battle.attacker_country,
-                    &war_relations,
-                ) {
-                    // Allied with defender (at war with attacker)
-                    Some(BattleSide::Defender)
-                } else {
-                    None
-                };
+    execute_movement(
+        commands,
+        army_hex_map,
+        armies_query,
+        entity,
+        next_hex,
+        next_pos,
+        old_pos,
+    );
+}
 
-                if let Some(side) = side {
-                    info!(
-                        "Army {:?} joins battle at {:?} on {:?} side",
-                        entity, next_hex, side
-                    );
+fn get_next_move(
+    armies_query: &Query<
+        (
+            Entity,
+            &mut Transform,
+            &Owner,
+            &mut ArmyComposition,
+            &mut HexPos,
+            Option<&mut ActivePath>,
+            Option<&InBattle>,
+        ),
+        With<Army>,
+    >,
+    commands: &mut Commands,
+    entity: Entity,
+) -> Option<(Hex, HexPos)> {
+    if let Ok((_, _, _, _, pos, Some(active_path), _)) = armies_query.get(entity) {
+        if let Some(h) = active_path.path.front() {
+            Some((*h, *pos))
+        } else {
+            commands.entity(entity).remove::<ActivePath>();
+            None
+        }
+    } else {
+        None
+    }
+}
 
-                    // Add to battle
-                    match side {
-                        BattleSide::Attacker => battle.attackers.push(entity),
-                        BattleSide::Defender => battle.defenders.push(entity),
-                    }
+fn try_join_battle(
+    commands: &mut Commands,
+    army_hex_map: &mut ResMut<ArmyHexMap>,
+    armies_query: &mut Query<
+        (
+            Entity,
+            &mut Transform,
+            &Owner,
+            &mut ArmyComposition,
+            &mut HexPos,
+            Option<&mut ActivePath>,
+            Option<&InBattle>,
+        ),
+        With<Army>,
+    >,
+    war_relations: &Query<&crate::war::WarRelations>,
+    battles: &mut Query<&mut Battle>,
+    entity: Entity,
+    next_hex: Hex,
+    old_pos: HexPos,
+) -> bool {
+    let battle_at_location = find_battle_at_location(armies_query, battles, next_hex);
 
-                    // Mark army as in battle
-                    commands.entity(entity).remove::<ActivePath>();
-                    commands.entity(entity).insert(InBattle { battle_entity });
+    let Some(battle_entity) = battle_at_location else {
+        return false;
+    };
 
-                    // Move army to battle location
-                    army_hex_map.remove(&old_pos);
-                    // Don't insert into hex map - battle location is shared
-                    if let Ok((_, mut transform, _, _, mut pos, _, _)) =
-                        armies_query.get_mut(entity)
-                    {
-                        *pos = next_pos;
-                        transform.translation =
-                            next_hex.axial_to_world(consts::HEX_SIZE).extend(5.0);
-                    }
+    let Ok((_, _, owner, _, _, _, _)) = armies_query.get(entity) else {
+        return false;
+    };
+    let Ok(mut battle) = battles.get_mut(battle_entity) else {
+        return false;
+    };
 
-                    continue;
+    let owner_entity = owner.0;
+    let side = determine_battle_side(owner_entity, &battle, war_relations);
+
+    let Some(side) = side else {
+        return false;
+    };
+
+    info!(
+        "Army {:?} joins battle at {:?} on {:?} side",
+        entity, next_hex, side
+    );
+
+    match side {
+        BattleSide::Attacker => battle.attackers.push(entity),
+        BattleSide::Defender => battle.defenders.push(entity),
+    }
+
+    commands.entity(entity).remove::<ActivePath>();
+    commands.entity(entity).insert(InBattle { battle_entity });
+    army_hex_map.remove(&old_pos);
+
+    if let Ok((_, mut transform, _, _, mut pos, _, _)) = armies_query.get_mut(entity) {
+        *pos = HexPos(next_hex);
+        transform.translation = next_hex.axial_to_world(consts::HEX_SIZE).extend(5.0);
+    }
+    true
+}
+
+fn find_battle_at_location(
+    armies_query: &Query<
+        (
+            Entity,
+            &mut Transform,
+            &Owner,
+            &mut ArmyComposition,
+            &mut HexPos,
+            Option<&mut ActivePath>,
+            Option<&InBattle>,
+        ),
+        With<Army>,
+    >,
+    battles: &Query<&mut Battle>,
+    hex: Hex,
+) -> Option<Entity> {
+    for (_, _, _, _, _, _, maybe_in_battle) in armies_query.iter() {
+        if let Some(in_battle) = maybe_in_battle {
+            if let Ok(battle) = battles.get(in_battle.battle_entity) {
+                if battle.location == hex {
+                    return Some(in_battle.battle_entity);
                 }
             }
         }
+    }
+    None
+}
 
-        if let Some(&occupant_entity) = army_hex_map.get(&next_pos) {
-            // Check if occupant entity still exists (might have been destroyed in battle)
-            if armies_query.get(occupant_entity).is_err() {
-                // Occupant was destroyed, clean up hex map
-                army_hex_map.remove(&next_pos);
-                // Continue to normal movement below
-            } else if let Ok(
-                [
-                    (e1, _, owner1, comp1, _, _, _),
-                    (e2, _, owner2, mut comp2, _, _, _),
-                ],
-            ) = armies_query.get_many_mut([entity, occupant_entity])
-            {
-                if owner1.0 == owner2.0 {
-                    info!("Merging army {:?} into {:?}", e1, e2);
-                    comp2.add(&comp1);
+fn determine_battle_side(
+    owner: Entity,
+    battle: &Battle,
+    war_relations: &Query<&crate::war::WarRelations>,
+) -> Option<BattleSide> {
+    if owner == battle.attacker_country {
+        Some(BattleSide::Attacker)
+    } else if owner == battle.defender_country {
+        Some(BattleSide::Defender)
+    } else if crate::war::are_at_war(owner, battle.defender_country, war_relations) {
+        Some(BattleSide::Attacker)
+    } else if crate::war::are_at_war(owner, battle.attacker_country, war_relations) {
+        Some(BattleSide::Defender)
+    } else {
+        None
+    }
+}
 
-                    army_hex_map.remove(&old_pos);
-                    commands.entity(e1).despawn();
+fn try_handle_collision(
+    commands: &mut Commands,
+    army_hex_map: &mut ResMut<ArmyHexMap>,
+    armies_query: &mut Query<
+        (
+            Entity,
+            &mut Transform,
+            &Owner,
+            &mut ArmyComposition,
+            &mut HexPos,
+            Option<&mut ActivePath>,
+            Option<&InBattle>,
+        ),
+        With<Army>,
+    >,
+    selected_army: &mut ResMut<SelectedArmy>,
+    war_relations: &Query<&crate::war::WarRelations>,
+    entity: Entity,
+    next_hex: Hex,
+    next_pos: HexPos,
+    old_pos: HexPos,
+) -> bool {
+    let Some(&occupant_entity) = army_hex_map.get(&next_pos) else {
+        return false;
+    };
 
-                    // If the merged army was selected, clear selection or select the target
-                    if selected_army.get() == Some(e1) {
-                        selected_army.set(e2);
-                        commands.entity(e2).insert(InteractionState::Selected);
-                    }
+    if armies_query.get(occupant_entity).is_err() {
+        army_hex_map.remove(&next_pos);
+        return false;
+    }
 
-                    continue;
-                } else {
-                    // Check if countries are at war before starting combat
-                    let are_at_war = crate::war::are_at_war(owner1.0, owner2.0, &war_relations);
+    let Ok(
+        [
+            (e1, _, owner1, comp1, _, _, _),
+            (e2, _, owner2, mut comp2, _, _, _),
+        ],
+    ) = armies_query.get_many_mut([entity, occupant_entity])
+    else {
+        return true;
+    };
 
-                    if !are_at_war {
-                        // Not at war - cannot attack, stop movement
-                        info!(
-                            "Cannot attack: {:?} and {:?} are not at war",
-                            owner1.0, owner2.0
-                        );
-                        commands.entity(e1).remove::<ActivePath>();
-                        continue;
-                    }
+    if owner1.0 == owner2.0 {
+        merge_armies(
+            commands,
+            army_hex_map,
+            selected_army,
+            e1,
+            e2,
+            &comp1,
+            &mut comp2,
+            old_pos,
+        );
+        return true;
+    }
 
-                    // COMBAT START
-                    info!(
-                        "Battle started between {:?} (attacker) and {:?} (defender) at {:?}",
-                        e1, e2, next_hex
-                    );
+    if !crate::war::are_at_war(owner1.0, owner2.0, war_relations) {
+        info!(
+            "Cannot attack: {:?} and {:?} are not at war",
+            owner1.0, owner2.0
+        );
+        commands.entity(e1).remove::<ActivePath>();
+        return true;
+    }
 
-                    // Stop movement
-                    commands.entity(e1).remove::<ActivePath>();
+    start_battle(commands, e1, e2, owner1.0, owner2.0, next_hex);
+    true
+}
 
-                    // Create Battle Entity with multi-army support
-                    let battle_id = commands
-                        .spawn(Battle {
-                            attackers: vec![e1],
-                            defenders: vec![e2],
-                            attacker_country: owner1.0,
-                            defender_country: owner2.0,
-                            location: next_hex,
-                            round: 0,
-                            last_damage_attacker: 0,
-                            last_damage_defender: 0,
-                        })
-                        .id();
+fn merge_armies(
+    commands: &mut Commands,
+    army_hex_map: &mut ResMut<ArmyHexMap>,
+    selected_army: &mut ResMut<SelectedArmy>,
+    source: Entity,
+    target: Entity,
+    source_comp: &ArmyComposition,
+    target_comp: &mut ArmyComposition,
+    old_pos: HexPos,
+) {
+    info!("Merging army {:?} into {:?}", source, target);
+    target_comp.add(source_comp);
+    army_hex_map.remove(&old_pos);
+    commands.entity(source).despawn();
 
-                    // Mark armies with their side
-                    commands.entity(e1).insert(InBattle {
-                        battle_entity: battle_id,
-                    });
-                    commands.entity(e2).insert(InBattle {
-                        battle_entity: battle_id,
-                    });
+    if selected_army.get() == Some(source) {
+        selected_army.set(target);
+        commands.entity(target).insert(InteractionState::Selected);
+    }
+}
 
-                    continue;
-                }
-            } else {
-                // Could not get both armies - one might have been destroyed, skip
-                continue;
-            }
-        }
+fn start_battle(
+    commands: &mut Commands,
+    attacker: Entity,
+    defender: Entity,
+    attacker_country: Entity,
+    defender_country: Entity,
+    location: Hex,
+) {
+    info!(
+        "Battle started between {:?} and {:?} at {:?}",
+        attacker, defender, location
+    );
+    commands.entity(attacker).remove::<ActivePath>();
 
-        if let Ok((_, mut transform, _, _, mut pos, Some(mut active_path), _)) =
-            armies_query.get_mut(entity)
-        {
-            active_path.path.pop_front();
+    let battle_id = commands
+        .spawn(Battle {
+            attackers: vec![attacker],
+            defenders: vec![defender],
+            attacker_country,
+            defender_country,
+            location,
+            round: 0,
+            last_damage_attacker: 0,
+            last_damage_defender: 0,
+        })
+        .id();
 
-            army_hex_map.remove(&old_pos);
-            army_hex_map.insert(next_pos, entity);
-            *pos = next_pos;
-            transform.translation = next_hex.axial_to_world(consts::HEX_SIZE).extend(5.0);
+    commands.entity(attacker).insert(InBattle {
+        battle_entity: battle_id,
+    });
+    commands.entity(defender).insert(InBattle {
+        battle_entity: battle_id,
+    });
+}
 
-            if active_path.path.is_empty() {
-                commands.entity(entity).remove::<ActivePath>();
-                info!("Army {:?} arrived at destination {:?}", entity, next_pos);
-            }
+fn execute_movement(
+    commands: &mut Commands,
+    army_hex_map: &mut ResMut<ArmyHexMap>,
+    armies_query: &mut Query<
+        (
+            Entity,
+            &mut Transform,
+            &Owner,
+            &mut ArmyComposition,
+            &mut HexPos,
+            Option<&mut ActivePath>,
+            Option<&InBattle>,
+        ),
+        With<Army>,
+    >,
+    entity: Entity,
+    next_hex: Hex,
+    next_pos: HexPos,
+    old_pos: HexPos,
+) {
+    if let Ok((_, mut transform, _, _, mut pos, Some(mut active_path), _)) =
+        armies_query.get_mut(entity)
+    {
+        active_path.path.pop_front();
+        army_hex_map.remove(&old_pos);
+        army_hex_map.insert(next_pos, entity);
+        *pos = next_pos;
+        transform.translation = next_hex.axial_to_world(consts::HEX_SIZE).extend(5.0);
+
+        if active_path.path.is_empty() {
+            commands.entity(entity).remove::<ActivePath>();
+            info!("Army {:?} arrived at destination {:?}", entity, next_pos);
         }
     }
 }

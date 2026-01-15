@@ -208,13 +208,9 @@ pub(crate) fn display_country_panel(
     mut country_flags: ResMut<CountryFlags>,
     images: Res<Assets<Image>>,
 ) {
-    let country = match selected_country.get() {
-        Some(entity) => entity,
-        None => {
-            // Clear selected provinces when no country selected
-            selected_provinces_for_peace.clear();
-            return;
-        }
+    let Some(country) = selected_country.get() else {
+        selected_provinces_for_peace.clear();
+        return;
     };
 
     let Ok((country_entity, name, coffer, color, maybe_flag)) = countries.get(country) else {
@@ -223,132 +219,233 @@ pub(crate) fn display_country_panel(
 
     let is_player = Some(country) == player.country;
     let player_country = player.country;
-
-    // Register flag texture with egui if not already done
-    let flag_texture_id: Option<TextureId> = if let Some(flag) = maybe_flag {
-        if let Some(texture_id) = country_flags.textures.get(&country_entity) {
-            Some(*texture_id)
-        } else if images.get(&flag.0).is_some() {
-            // Image is loaded, register it with egui
-            info!("Registering flag texture for country {:?}", country_entity);
-            let texture_id = contexts.add_image(EguiTextureHandle::Strong(flag.0.clone()));
-            country_flags.textures.insert(country_entity, texture_id);
-            Some(texture_id)
-        } else {
-            // Image not loaded yet
-            info!("Flag image not loaded yet for country {:?}", country_entity);
-            None
-        }
-    } else {
-        info!("No flag component for country {:?}", country_entity);
-        None
-    };
+    let flag_texture_id = get_flag_texture(
+        &mut contexts,
+        &mut country_flags,
+        &images,
+        country_entity,
+        maybe_flag,
+    );
 
     let ctx = match contexts.ctx_mut() {
         Ok(c) => c,
         Err(_) => return,
     };
 
-    let country_frame = egui_common::default_frame();
+    render_country_window(
+        ctx,
+        &name.0,
+        coffer,
+        color,
+        is_player,
+        player_country,
+        country_entity,
+        flag_texture_id,
+        &mut selected_country,
+        &mut selected_provinces_for_peace,
+        &mut current_tab,
+        &war_relations,
+        &wars,
+        &war_query,
+        &mut declare_war_events,
+        &mut peace_offer_events,
+        &provinces,
+    );
+}
 
+fn get_flag_texture(
+    contexts: &mut EguiContexts,
+    country_flags: &mut ResMut<CountryFlags>,
+    images: &Res<Assets<Image>>,
+    country_entity: Entity,
+    maybe_flag: Option<&Flag>,
+) -> Option<TextureId> {
+    let flag = maybe_flag?;
+
+    if let Some(&texture_id) = country_flags.textures.get(&country_entity) {
+        return Some(texture_id);
+    }
+
+    if images.get(&flag.0).is_some() {
+        let texture_id = contexts.add_image(EguiTextureHandle::Strong(flag.0.clone()));
+        country_flags.textures.insert(country_entity, texture_id);
+        return Some(texture_id);
+    }
+
+    None
+}
+
+fn render_country_window(
+    ctx: &egui::Context,
+    name: &str,
+    coffer: &Coffer,
+    color: &MapColor,
+    is_player: bool,
+    player_country: Option<Entity>,
+    country_entity: Entity,
+    flag_texture_id: Option<TextureId>,
+    selected_country: &mut ResMut<SelectedCountry>,
+    selected_provinces_for_peace: &mut Local<HashSet<Entity>>,
+    current_tab: &mut Local<CountryTab>,
+    war_relations: &Query<&WarRelations>,
+    wars: &Res<Wars>,
+    war_query: &Query<(Entity, &War)>,
+    declare_war_events: &mut MessageWriter<DeclareWarEvent>,
+    peace_offer_events: &mut MessageWriter<PeaceOfferEvent>,
+    provinces: &Query<(Entity, &Province, &Owner, Option<&Occupied>)>,
+) {
     egui::Window::new("Country")
-        .frame(country_frame)
+        .frame(egui_common::default_frame())
         .title_bar(false)
         .anchor(egui::Align2::RIGHT_TOP, [-20.0, 20.0])
         .resizable(false)
         .default_width(280.0)
         .show(ctx, |ui| {
-            // Header with flag
-            ui.horizontal(|ui| {
-                // Display flag if available
-                if let Some(texture_id) = flag_texture_id {
-                    ui.add(egui::Image::new(egui::load::SizedTexture::new(
-                        texture_id,
-                        egui::vec2(48.0, 32.0),
-                    )));
-                    ui.add_space(8.0);
-                }
+            render_country_header(
+                ui,
+                name,
+                is_player,
+                flag_texture_id,
+                selected_country,
+                selected_provinces_for_peace,
+            );
+            render_country_tabs(ui, current_tab, is_player, player_country.is_some());
+            render_country_content(
+                ui,
+                coffer,
+                color,
+                is_player,
+                player_country,
+                country_entity,
+                current_tab,
+                war_relations,
+                wars,
+                war_query,
+                declare_war_events,
+                peace_offer_events,
+                provinces,
+                selected_provinces_for_peace,
+            );
+        });
+}
 
-                ui.add(egui::Label::new(
-                    RichText::new(&name.0)
-                        .font(egui::FontId::proportional(22.0))
-                        .color(Color32::WHITE)
-                        .strong(),
-                ));
-
-                if is_player {
-                    ui.add(egui::Label::new(
-                        RichText::new("(You)").color(Color32::GREEN).italics(),
-                    ));
-                }
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if egui_common::close_button(ui) {
-                        selected_country.clear();
-                        selected_provinces_for_peace.clear();
-                    }
-                });
-            });
-
+fn render_country_header(
+    ui: &mut egui::Ui,
+    name: &str,
+    is_player: bool,
+    flag_texture_id: Option<TextureId>,
+    selected_country: &mut ResMut<SelectedCountry>,
+    selected_provinces_for_peace: &mut Local<HashSet<Entity>>,
+) {
+    ui.horizontal(|ui| {
+        if let Some(texture_id) = flag_texture_id {
+            ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                texture_id,
+                egui::vec2(48.0, 32.0),
+            )));
             ui.add_space(8.0);
-            ui.separator();
+        }
 
-            // Tabs - only show Diplomacy tab if viewing another country as player
-            let show_diplomacy = !is_player && player_country.is_some();
+        ui.add(egui::Label::new(
+            RichText::new(name)
+                .font(egui::FontId::proportional(22.0))
+                .color(Color32::WHITE)
+                .strong(),
+        ));
 
-            ui.horizontal(|ui| {
-                if ui
-                    .selectable_label(*current_tab == CountryTab::Info, "📊 Info")
-                    .clicked()
-                {
-                    *current_tab = CountryTab::Info;
-                }
-                if show_diplomacy
-                    && ui
-                        .selectable_label(*current_tab == CountryTab::Diplomacy, "⚔ Diplomacy")
-                        .clicked()
-                {
-                    *current_tab = CountryTab::Diplomacy;
-                }
-            });
+        if is_player {
+            ui.add(egui::Label::new(
+                RichText::new("(You)").color(Color32::GREEN).italics(),
+            ));
+        }
 
-            ui.separator();
-            ui.add_space(8.0);
-
-            match *current_tab {
-                CountryTab::Info => {
-                    egui::Grid::new("country_stats")
-                        .num_columns(2)
-                        .spacing([20.0, 8.0])
-                        .show(ui, |ui| {
-                            ui.label(RichText::new("Treasury").color(Color32::LIGHT_GRAY));
-                            ui.label(
-                                RichText::new(format!("{:.2}g", coffer.0)).color(Color32::GOLD),
-                            );
-                            ui.end_row();
-
-                            ui.label(RichText::new("Map Color").color(Color32::LIGHT_GRAY));
-                            let [r, g, b] = color.0.to_srgba().to_f32_array_no_alpha();
-                            ui.color_edit_button_rgb(&mut [r, g, b]);
-                            ui.end_row();
-                        });
-                }
-                CountryTab::Diplomacy => {
-                    if let Some(player_country) = player_country {
-                        draw_diplomacy_tab(
-                            ui,
-                            player_country,
-                            country_entity,
-                            &war_relations,
-                            &wars,
-                            &war_query,
-                            &mut declare_war_events,
-                            &mut peace_offer_events,
-                            &provinces,
-                            &mut selected_provinces_for_peace,
-                        );
-                    }
-                }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if egui_common::close_button(ui) {
+                selected_country.clear();
+                selected_provinces_for_peace.clear();
             }
+        });
+    });
+    ui.add_space(8.0);
+    ui.separator();
+}
+
+fn render_country_tabs(
+    ui: &mut egui::Ui,
+    current_tab: &mut Local<CountryTab>,
+    is_player: bool,
+    has_player: bool,
+) {
+    let show_diplomacy = !is_player && has_player;
+
+    ui.horizontal(|ui| {
+        if ui
+            .selectable_label(**current_tab == CountryTab::Info, "📊 Info")
+            .clicked()
+        {
+            **current_tab = CountryTab::Info;
+        }
+        if show_diplomacy
+            && ui
+                .selectable_label(**current_tab == CountryTab::Diplomacy, "⚔ Diplomacy")
+                .clicked()
+        {
+            **current_tab = CountryTab::Diplomacy;
+        }
+    });
+    ui.separator();
+    ui.add_space(8.0);
+}
+
+fn render_country_content(
+    ui: &mut egui::Ui,
+    coffer: &Coffer,
+    color: &MapColor,
+    _is_player: bool,
+    player_country: Option<Entity>,
+    country_entity: Entity,
+    current_tab: &mut Local<CountryTab>,
+    war_relations: &Query<&WarRelations>,
+    wars: &Res<Wars>,
+    war_query: &Query<(Entity, &War)>,
+    declare_war_events: &mut MessageWriter<DeclareWarEvent>,
+    peace_offer_events: &mut MessageWriter<PeaceOfferEvent>,
+    provinces: &Query<(Entity, &Province, &Owner, Option<&Occupied>)>,
+    selected_provinces_for_peace: &mut Local<HashSet<Entity>>,
+) {
+    match **current_tab {
+        CountryTab::Info => render_info_tab(ui, coffer, color),
+        CountryTab::Diplomacy => {
+            if let Some(player_country) = player_country {
+                draw_diplomacy_tab(
+                    ui,
+                    player_country,
+                    country_entity,
+                    war_relations,
+                    wars,
+                    war_query,
+                    declare_war_events,
+                    peace_offer_events,
+                    provinces,
+                    selected_provinces_for_peace,
+                );
+            }
+        }
+    }
+}
+
+fn render_info_tab(ui: &mut egui::Ui, coffer: &Coffer, color: &MapColor) {
+    egui::Grid::new("country_stats")
+        .num_columns(2)
+        .spacing([20.0, 8.0])
+        .show(ui, |ui| {
+            ui.label(RichText::new("Treasury").color(Color32::LIGHT_GRAY));
+            ui.label(RichText::new(format!("{:.2}g", coffer.0)).color(Color32::GOLD));
+            ui.end_row();
+
+            ui.label(RichText::new("Map Color").color(Color32::LIGHT_GRAY));
+            let [r, g, b] = color.0.to_srgba().to_f32_array_no_alpha();
+            ui.color_edit_button_rgb(&mut [r, g, b]);
+            ui.end_row();
         });
 }

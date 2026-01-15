@@ -569,11 +569,7 @@ pub(crate) fn display_province_panel(
         return;
     };
 
-    let owner_name = maybe_owner
-        .and_then(|owner| countries.get(owner.0).ok())
-        .map(|(name, _)| name.0.clone())
-        .unwrap_or_else(|| "Unowned".to_string());
-
+    let owner_name = get_owner_name(maybe_owner, &countries);
     let is_player_owned = maybe_owner
         .map(|o| Some(o.0) == player.country)
         .unwrap_or(false);
@@ -583,294 +579,467 @@ pub(crate) fn display_province_panel(
         Err(_) => return,
     };
 
-    let panel_frame = egui_common::default_frame();
-
     egui::Window::new("Province")
-        .frame(panel_frame)
+        .frame(egui_common::default_frame())
         .title_bar(false)
         .anchor(Align2::LEFT_TOP, [20.0, 20.0])
         .resizable(false)
         .default_width(250.0)
         .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.add(egui::Label::new(
-                    RichText::new(&province.name)
-                        .font(egui::FontId::proportional(22.0))
-                        .color(Color32::WHITE)
-                        .strong(),
-                ));
-                ui.add_space(8.0);
-                if egui_common::close_button(ui) {
-                    commands.entity(selected_id).insert(InteractionState::None);
-                    selected_province.clear();
-                }
-            });
-
-            ui.add_space(8.0);
-
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                let tabs = [
-                    (ProvinceTab::Overview, "Overview"),
-                    (ProvinceTab::Buildings, "Buildings"),
-                    (ProvinceTab::Recruitment, "Recruitment"),
-                ];
-
-                for (tab, label) in tabs {
-                    let is_selected = *current_tab == tab;
-                    let text_color = if is_selected {
-                        Color32::WHITE
-                    } else {
-                        Color32::GRAY
-                    };
-                    let bg_color = if is_selected {
-                        Color32::from_rgb(60, 80, 120)
-                    } else {
-                        Color32::TRANSPARENT
-                    };
-
-                    if ui
-                        .add(
-                            egui::Button::new(RichText::new(label).color(text_color))
-                                .fill(bg_color)
-                                .stroke(Stroke::new(1.0, Color32::from_rgb(100, 100, 100))),
-                        )
-                        .clicked()
-                    {
-                        *current_tab = tab;
-                    }
-                }
-            });
-
-            ui.add_space(4.0);
-            ui.separator();
-            ui.add_space(8.0);
+            draw_province_header(
+                ui,
+                province,
+                &mut commands,
+                selected_id,
+                &mut selected_province,
+            );
+            draw_tab_selector(ui, &mut current_tab);
 
             match *current_tab {
-                ProvinceTab::Recruitment => {
-                    let available_ducats = maybe_owner
-                        .and_then(|owner| coffers.get(owner.0).ok())
-                        .map(|coffer| coffer.get_ducats())
-                        .unwrap_or(0.0);
-
-                    ui.heading(RichText::new("Recruitment").size(16.0));
-                    ui.add_space(4.0);
-                    ui.label(format!("Available ducats: {:.0}💰", available_ducats));
-                    ui.separator();
-                    ui.add_space(8.0);
-
-                    if maybe_owner.is_none() {
-                        ui.label(RichText::new("This province has no owner").italics().weak());
-                        return;
-                    }
-
-                    if !is_player_owned {
-                        ui.label(
-                            RichText::new("You do not own this province")
-                                .italics()
-                                .weak(),
-                        );
-                        return;
-                    }
-
-                    for unit_type in UnitType::all() {
-                        let cost = unit_type.cost();
-                        let can_afford = available_ducats >= cost;
-
-                        ui.horizontal(|ui| {
-                            let button_text = format!("{} ({:.0}💰)", unit_type.name(), cost);
-                            let button =
-                                egui::Button::new(button_text).min_size(egui::vec2(200.0, 0.0));
-
-                            let button = if !can_afford {
-                                button.fill(Color32::from_rgb(80, 60, 60))
-                            } else {
-                                button.fill(Color32::from_rgb(70, 70, 90))
-                            };
-
-                            if ui.add_enabled(can_afford, button).clicked()
-                                && let Some(owner) = maybe_owner
-                                && let Ok(mut coffer) = coffers.get_mut(owner.0)
-                            {
-                                // Add unit
-                                let hex = *province.get_hex();
-                                let hex_pos = HexPos::new(hex);
-
-                                if let Some(&army_entity) = army_hex_map.get(&hex_pos) {
-                                    if let Ok((army_owner, mut comp)) =
-                                        armies_query.get_mut(army_entity)
-                                    {
-                                        if army_owner.0 == owner.0 {
-                                            // MERGE into existing army
-                                            coffer.remove_ducats(cost);
-                                            comp.add_unit(unit_type);
-                                        } else {
-                                            warn!("Cannot recruit: tile occupied by another army");
-                                        }
-                                    } else {
-                                        warn!("Map inconsistency: Army entity not found in query");
-                                    }
-                                } else if let Ok((_, map_color)) = countries.get(owner.0) {
-                                    // SPAWN new army
-                                    coffer.remove_ducats(cost);
-                                    let mut comp = ArmyComposition {
-                                        infantry: 0,
-                                        cavalry: 0,
-                                        artillery: 0,
-                                    };
-                                    comp.add_unit(unit_type);
-
-                                    let army = spawn_army(
-                                        &mut commands,
-                                        &mut meshes,
-                                        &mut materials,
-                                        hex,
-                                        owner.0,
-                                        map_color.0,
-                                        comp,
-                                    );
-                                    army_hex_map.insert(hex_pos, army);
-                                }
-                            }
-                        });
-                        ui.add_space(5.0);
-                    }
-                }
-                ProvinceTab::Buildings => {
-                    let existing_buildings: HashSet<BuildingType> =
-                        if let Some(children) = maybe_children {
-                            children
-                                .iter()
-                                .filter_map(|&child_id| buildings.get(child_id).ok())
-                                .map(|building| building.building_type)
-                                .collect()
-                        } else {
-                            HashSet::new()
-                        };
-
-                    let available_ducats = maybe_owner
-                        .and_then(|owner| coffers.get(owner.0).ok())
-                        .map(|coffer| coffer.get_ducats())
-                        .unwrap_or(0.0);
-
-                    ui.heading(RichText::new("Buildings").size(16.0));
-                    ui.add_space(4.0);
-                    ui.label(format!("Available ducats: {:.0}💰", available_ducats));
-                    ui.separator();
-                    ui.add_space(8.0);
-
-                    if maybe_owner.is_none() {
-                        ui.label(RichText::new("This province has no owner").italics().weak());
-                        return;
-                    }
-
-                    for building_type in BuildingType::all_types() {
-                        let already_built = existing_buildings.contains(&building_type);
-                        let can_afford = available_ducats >= building_type.cost();
-                        let enabled = !already_built && can_afford && is_player_owned;
-
-                        ui.horizontal(|ui| {
-                            let button_text = if already_built {
-                                format!("✓ {}", building_type.name())
-                            } else {
-                                format!("{} ({:.0}💰)", building_type.name(), building_type.cost())
-                            };
-
-                            let button =
-                                egui::Button::new(button_text).min_size(egui::vec2(200.0, 0.0));
-                            let button = if already_built {
-                                button.fill(Color32::from_rgb(60, 80, 120))
-                            } else if !enabled {
-                                button.fill(Color32::from_rgb(80, 60, 60))
-                            } else {
-                                button.fill(Color32::from_rgb(70, 70, 90))
-                            };
-
-                            let response = ui.add_enabled(enabled, button);
-
-                            if response.clicked()
-                                && let Some(owner) = maybe_owner
-                                && let Ok(mut coffer) = coffers.get_mut(owner.0)
-                            {
-                                coffer.remove_ducats(building_type.cost());
-                                commands.entity(selected_id).with_children(|parent| {
-                                    parent.spawn((
-                                        Building { building_type },
-                                        Income::new(building_type.income_bonus()),
-                                        Owner(owner.0),
-                                    ));
-                                });
-                            }
-
-                            if response.hovered() {
-                                response.on_hover_text(building_type.description());
-                            }
-                        });
-
-                        ui.add_space(5.0);
-                    }
-                }
-                ProvinceTab::Overview => {
-                    egui::Grid::new("province_stats")
-                        .num_columns(2)
-                        .spacing([20.0, 8.0])
-                        .show(ui, |ui| {
-                            ui.label(RichText::new("Owner").color(Color32::LIGHT_GRAY));
-                            if ui
-                                .button(
-                                    RichText::new(&owner_name)
-                                        .color(Color32::from_rgb(100, 200, 255))
-                                        .underline(),
-                                )
-                                .clicked()
-                                && let Some(owner) = maybe_owner
-                            {
-                                selected_country.select(owner.0);
-                            }
-                            ui.end_row();
-
-                            ui.label(RichText::new("Terrain").color(Color32::LIGHT_GRAY));
-                            ui.label(
-                                RichText::new(province.terrain.to_string()).color(Color32::WHITE),
-                            );
-                            ui.end_row();
-
-                            // Show occupation status
-                            if let Some(occupied) = maybe_occupied {
-                                ui.label(RichText::new("Status").color(Color32::LIGHT_GRAY));
-                                let occupier_name = countries
-                                    .get(occupied.occupier)
-                                    .map(|(n, _)| n.0.as_str())
-                                    .unwrap_or("Unknown");
-                                ui.label(
-                                    RichText::new(format!("⚔ Occupied by {}", occupier_name))
-                                        .color(Color32::RED),
-                                );
-                                ui.end_row();
-                            }
-
-                            // Show siege progress
-                            if let Some(siege) = maybe_siege {
-                                ui.label(RichText::new("Siege").color(Color32::LIGHT_GRAY));
-                                let besieger_name = countries
-                                    .get(siege.besieger_country)
-                                    .map(|(n, _)| n.0.as_str())
-                                    .unwrap_or("Unknown");
-                                ui.label(
-                                    RichText::new(format!(
-                                        "🏰 Under siege by {} ({}/{})",
-                                        besieger_name,
-                                        siege.progress,
-                                        crate::war::SIEGE_TURNS_REQUIRED
-                                    ))
-                                    .color(Color32::YELLOW),
-                                );
-                                ui.end_row();
-                            }
-                        });
-                }
+                ProvinceTab::Recruitment => draw_recruitment_tab(
+                    ui,
+                    province,
+                    maybe_owner,
+                    is_player_owned,
+                    &mut coffers,
+                    &countries,
+                    &mut army_hex_map,
+                    &mut armies_query,
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                ),
+                ProvinceTab::Buildings => draw_buildings_tab(
+                    ui,
+                    selected_id,
+                    maybe_owner,
+                    maybe_children,
+                    is_player_owned,
+                    &buildings,
+                    &mut coffers,
+                    &mut commands,
+                ),
+                ProvinceTab::Overview => draw_overview_tab(
+                    ui,
+                    province,
+                    &owner_name,
+                    maybe_owner,
+                    maybe_occupied,
+                    maybe_siege,
+                    &countries,
+                    &mut selected_country,
+                ),
             }
         });
+}
+
+fn get_owner_name(
+    maybe_owner: Option<&Owner>,
+    countries: &Query<(&DisplayName, &MapColor)>,
+) -> String {
+    maybe_owner
+        .and_then(|owner| countries.get(owner.0).ok())
+        .map(|(name, _)| name.0.clone())
+        .unwrap_or_else(|| "Unowned".to_string())
+}
+
+fn draw_province_header(
+    ui: &mut egui::Ui,
+    province: &Province,
+    commands: &mut Commands,
+    selected_id: Entity,
+    selected_province: &mut ResMut<SelectedProvince>,
+) {
+    ui.horizontal(|ui| {
+        ui.add(egui::Label::new(
+            RichText::new(&province.name)
+                .font(egui::FontId::proportional(22.0))
+                .color(Color32::WHITE)
+                .strong(),
+        ));
+        ui.add_space(8.0);
+        if egui_common::close_button(ui) {
+            commands.entity(selected_id).insert(InteractionState::None);
+            selected_province.clear();
+        }
+    });
+    ui.add_space(8.0);
+}
+
+fn draw_tab_selector(ui: &mut egui::Ui, current_tab: &mut Local<ProvinceTab>) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let tabs = [
+            (ProvinceTab::Overview, "Overview"),
+            (ProvinceTab::Buildings, "Buildings"),
+            (ProvinceTab::Recruitment, "Recruitment"),
+        ];
+
+        for (tab, label) in tabs {
+            let is_selected = **current_tab == tab;
+            let text_color = if is_selected {
+                Color32::WHITE
+            } else {
+                Color32::GRAY
+            };
+            let bg_color = if is_selected {
+                Color32::from_rgb(60, 80, 120)
+            } else {
+                Color32::TRANSPARENT
+            };
+
+            if ui
+                .add(
+                    egui::Button::new(RichText::new(label).color(text_color))
+                        .fill(bg_color)
+                        .stroke(Stroke::new(1.0, Color32::from_rgb(100, 100, 100))),
+                )
+                .clicked()
+            {
+                **current_tab = tab;
+            }
+        }
+    });
+    ui.add_space(4.0);
+    ui.separator();
+    ui.add_space(8.0);
+}
+
+fn draw_recruitment_tab(
+    ui: &mut egui::Ui,
+    province: &Province,
+    maybe_owner: Option<&Owner>,
+    is_player_owned: bool,
+    coffers: &mut Query<&mut Coffer>,
+    countries: &Query<(&DisplayName, &MapColor)>,
+    army_hex_map: &mut ResMut<ArmyHexMap>,
+    armies_query: &mut Query<(&Owner, &mut ArmyComposition)>,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<ColorMaterial>>,
+) {
+    let available_ducats = maybe_owner
+        .and_then(|owner| coffers.get(owner.0).ok())
+        .map(|coffer| coffer.get_ducats())
+        .unwrap_or(0.0);
+
+    ui.heading(RichText::new("Recruitment").size(16.0));
+    ui.add_space(4.0);
+    ui.label(format!("Available ducats: {:.0}💰", available_ducats));
+    ui.separator();
+    ui.add_space(8.0);
+
+    if maybe_owner.is_none() {
+        ui.label(RichText::new("This province has no owner").italics().weak());
+        return;
+    }
+
+    if !is_player_owned {
+        ui.label(
+            RichText::new("You do not own this province")
+                .italics()
+                .weak(),
+        );
+        return;
+    }
+
+    for unit_type in UnitType::all() {
+        draw_recruitment_button(
+            ui,
+            province,
+            maybe_owner.unwrap(),
+            unit_type,
+            available_ducats,
+            coffers,
+            countries,
+            army_hex_map,
+            armies_query,
+            commands,
+            meshes,
+            materials,
+        );
+        ui.add_space(5.0);
+    }
+}
+
+fn draw_recruitment_button(
+    ui: &mut egui::Ui,
+    province: &Province,
+    owner: &Owner,
+    unit_type: UnitType,
+    available_ducats: f32,
+    coffers: &mut Query<&mut Coffer>,
+    countries: &Query<(&DisplayName, &MapColor)>,
+    army_hex_map: &mut ResMut<ArmyHexMap>,
+    armies_query: &mut Query<(&Owner, &mut ArmyComposition)>,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<ColorMaterial>>,
+) {
+    let cost = unit_type.cost();
+    let can_afford = available_ducats >= cost;
+
+    ui.horizontal(|ui| {
+        let button_text = format!("{} ({:.0}💰)", unit_type.name(), cost);
+        let button = egui::Button::new(button_text).min_size(egui::vec2(200.0, 0.0));
+        let button = if !can_afford {
+            button.fill(Color32::from_rgb(80, 60, 60))
+        } else {
+            button.fill(Color32::from_rgb(70, 70, 90))
+        };
+
+        if ui.add_enabled(can_afford, button).clicked() {
+            recruit_unit(
+                province,
+                owner,
+                unit_type,
+                cost,
+                coffers,
+                countries,
+                army_hex_map,
+                armies_query,
+                commands,
+                meshes,
+                materials,
+            );
+        }
+    });
+}
+
+fn recruit_unit(
+    province: &Province,
+    owner: &Owner,
+    unit_type: UnitType,
+    cost: f32,
+    coffers: &mut Query<&mut Coffer>,
+    countries: &Query<(&DisplayName, &MapColor)>,
+    army_hex_map: &mut ResMut<ArmyHexMap>,
+    armies_query: &mut Query<(&Owner, &mut ArmyComposition)>,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<ColorMaterial>>,
+) {
+    let Ok(mut coffer) = coffers.get_mut(owner.0) else {
+        return;
+    };
+    let hex = *province.get_hex();
+    let hex_pos = HexPos::new(hex);
+
+    if let Some(&army_entity) = army_hex_map.get(&hex_pos) {
+        if let Ok((army_owner, mut comp)) = armies_query.get_mut(army_entity) {
+            if army_owner.0 == owner.0 {
+                coffer.remove_ducats(cost);
+                comp.add_unit(unit_type);
+            } else {
+                warn!("Cannot recruit: tile occupied by another army");
+            }
+        }
+    } else if let Ok((_, map_color)) = countries.get(owner.0) {
+        coffer.remove_ducats(cost);
+        let mut comp = ArmyComposition {
+            infantry: 0,
+            cavalry: 0,
+            artillery: 0,
+        };
+        comp.add_unit(unit_type);
+        let army = spawn_army(commands, meshes, materials, hex, owner.0, map_color.0, comp);
+        army_hex_map.insert(hex_pos, army);
+    }
+}
+
+fn draw_buildings_tab(
+    ui: &mut egui::Ui,
+    selected_id: Entity,
+    maybe_owner: Option<&Owner>,
+    maybe_children: Option<&Children>,
+    is_player_owned: bool,
+    buildings: &Query<&Building>,
+    coffers: &mut Query<&mut Coffer>,
+    commands: &mut Commands,
+) {
+    let existing_buildings: HashSet<BuildingType> = maybe_children
+        .map(|children| {
+            children
+                .iter()
+                .filter_map(|&child_id| buildings.get(child_id).ok())
+                .map(|building| building.building_type)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let available_ducats = maybe_owner
+        .and_then(|owner| coffers.get(owner.0).ok())
+        .map(|coffer| coffer.get_ducats())
+        .unwrap_or(0.0);
+
+    ui.heading(RichText::new("Buildings").size(16.0));
+    ui.add_space(4.0);
+    ui.label(format!("Available ducats: {:.0}💰", available_ducats));
+    ui.separator();
+    ui.add_space(8.0);
+
+    if maybe_owner.is_none() {
+        ui.label(RichText::new("This province has no owner").italics().weak());
+        return;
+    }
+
+    for building_type in BuildingType::all_types() {
+        draw_building_button(
+            ui,
+            selected_id,
+            maybe_owner,
+            building_type,
+            &existing_buildings,
+            available_ducats,
+            is_player_owned,
+            coffers,
+            commands,
+        );
+        ui.add_space(5.0);
+    }
+}
+
+fn draw_building_button(
+    ui: &mut egui::Ui,
+    selected_id: Entity,
+    maybe_owner: Option<&Owner>,
+    building_type: BuildingType,
+    existing_buildings: &HashSet<BuildingType>,
+    available_ducats: f32,
+    is_player_owned: bool,
+    coffers: &mut Query<&mut Coffer>,
+    commands: &mut Commands,
+) {
+    let already_built = existing_buildings.contains(&building_type);
+    let can_afford = available_ducats >= building_type.cost();
+    let enabled = !already_built && can_afford && is_player_owned;
+
+    ui.horizontal(|ui| {
+        let button_text = if already_built {
+            format!("✓ {}", building_type.name())
+        } else {
+            format!("{} ({:.0}💰)", building_type.name(), building_type.cost())
+        };
+
+        let button = egui::Button::new(button_text).min_size(egui::vec2(200.0, 0.0));
+        let button = if already_built {
+            button.fill(Color32::from_rgb(60, 80, 120))
+        } else if !enabled {
+            button.fill(Color32::from_rgb(80, 60, 60))
+        } else {
+            button.fill(Color32::from_rgb(70, 70, 90))
+        };
+
+        let response = ui.add_enabled(enabled, button);
+
+        if response.clicked() {
+            if let Some(owner) = maybe_owner {
+                if let Ok(mut coffer) = coffers.get_mut(owner.0) {
+                    coffer.remove_ducats(building_type.cost());
+                    commands.entity(selected_id).with_children(|parent| {
+                        parent.spawn((
+                            Building { building_type },
+                            Income::new(building_type.income_bonus()),
+                            Owner(owner.0),
+                        ));
+                    });
+                }
+            }
+        }
+
+        if response.hovered() {
+            response.on_hover_text(building_type.description());
+        }
+    });
+}
+
+fn draw_overview_tab(
+    ui: &mut egui::Ui,
+    province: &Province,
+    owner_name: &str,
+    maybe_owner: Option<&Owner>,
+    maybe_occupied: Option<&crate::war::Occupied>,
+    maybe_siege: Option<&crate::war::SiegeProgress>,
+    countries: &Query<(&DisplayName, &MapColor)>,
+    selected_country: &mut ResMut<SelectedCountry>,
+) {
+    egui::Grid::new("province_stats")
+        .num_columns(2)
+        .spacing([20.0, 8.0])
+        .show(ui, |ui| {
+            draw_owner_row(ui, owner_name, maybe_owner, selected_country);
+            draw_terrain_row(ui, province);
+            draw_occupation_row(ui, maybe_occupied, countries);
+            draw_siege_row(ui, maybe_siege, countries);
+        });
+}
+
+fn draw_owner_row(
+    ui: &mut egui::Ui,
+    owner_name: &str,
+    maybe_owner: Option<&Owner>,
+    selected_country: &mut ResMut<SelectedCountry>,
+) {
+    ui.label(RichText::new("Owner").color(Color32::LIGHT_GRAY));
+    if ui
+        .button(
+            RichText::new(owner_name)
+                .color(Color32::from_rgb(100, 200, 255))
+                .underline(),
+        )
+        .clicked()
+    {
+        if let Some(owner) = maybe_owner {
+            selected_country.select(owner.0);
+        }
+    }
+    ui.end_row();
+}
+
+fn draw_terrain_row(ui: &mut egui::Ui, province: &Province) {
+    ui.label(RichText::new("Terrain").color(Color32::LIGHT_GRAY));
+    ui.label(RichText::new(province.terrain.to_string()).color(Color32::WHITE));
+    ui.end_row();
+}
+
+fn draw_occupation_row(
+    ui: &mut egui::Ui,
+    maybe_occupied: Option<&crate::war::Occupied>,
+    countries: &Query<(&DisplayName, &MapColor)>,
+) {
+    if let Some(occupied) = maybe_occupied {
+        ui.label(RichText::new("Status").color(Color32::LIGHT_GRAY));
+        let occupier_name = countries
+            .get(occupied.occupier)
+            .map(|(n, _)| n.0.as_str())
+            .unwrap_or("Unknown");
+        ui.label(RichText::new(format!("⚔ Occupied by {}", occupier_name)).color(Color32::RED));
+        ui.end_row();
+    }
+}
+
+fn draw_siege_row(
+    ui: &mut egui::Ui,
+    maybe_siege: Option<&crate::war::SiegeProgress>,
+    countries: &Query<(&DisplayName, &MapColor)>,
+) {
+    if let Some(siege) = maybe_siege {
+        ui.label(RichText::new("Siege").color(Color32::LIGHT_GRAY));
+        let besieger_name = countries
+            .get(siege.besieger_country)
+            .map(|(n, _)| n.0.as_str())
+            .unwrap_or("Unknown");
+        ui.label(
+            RichText::new(format!(
+                "🏰 Under siege by {} ({}/{})",
+                besieger_name,
+                siege.progress,
+                crate::war::SIEGE_TURNS_REQUIRED
+            ))
+            .color(Color32::YELLOW),
+        );
+        ui.end_row();
+    }
 }
 
 /// Egui component for showing and selecting possible map modes (political and terrain).

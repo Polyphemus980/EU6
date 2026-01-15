@@ -6,8 +6,8 @@ use crate::war::{
     draw_diplomacy_tab, DeclareWarEvent, Occupied, PeaceOfferEvent, War, WarRelations, Wars,
 };
 use bevy::prelude::*;
-use bevy_egui::egui::{Color32, RichText};
-use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
+use bevy_egui::egui::{Color32, RichText, TextureId};
+use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass, EguiTextureHandle};
 use std::collections::{HashMap, HashSet};
 
 pub struct CountryPlugin;
@@ -15,6 +15,7 @@ pub struct CountryPlugin;
 impl Plugin for CountryPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(SelectedCountry::default())
+            .insert_resource(CountryFlags::default())
             .add_systems(
                 Startup,
                 setup_countries_from_map.after(crate::map::generate_map),
@@ -42,6 +43,16 @@ pub(crate) struct Country {}
 pub(crate) struct DisplayName(pub(crate) String);
 #[derive(Component)]
 pub(crate) struct MapColor(pub(crate) Color);
+
+/// Component storing the flag texture handle for a country
+#[derive(Component)]
+pub(crate) struct Flag(pub(crate) Handle<Image>);
+
+/// Resource storing egui texture IDs for country flags
+#[derive(Resource, Default)]
+pub(crate) struct CountryFlags {
+    pub(crate) textures: HashMap<Entity, TextureId>,
+}
 
 /// Component representing the amount of gold a country has.
 #[derive(Component)]
@@ -98,13 +109,13 @@ impl CountryBundle {
         }
     }
 }
-/// Spawns a country entity with the given name and map color.
-pub fn spawn_country(commands: &mut Commands, name: &str, color: Color) -> Entity {
-    commands.spawn(CountryBundle::new(name, color)).id()
-}
 
 /// Setup countries from map data - creates country entities based on what's in the map file
-pub(crate) fn setup_countries_from_map(mut commands: Commands, map_data: Res<MapData>) {
+pub(crate) fn setup_countries_from_map(
+    mut commands: Commands,
+    map_data: Res<MapData>,
+    asset_server: Res<AssetServer>,
+) {
     info!(
         "Setting up {} countries from map data",
         map_data.countries.len()
@@ -116,8 +127,19 @@ pub(crate) fn setup_countries_from_map(mut commands: Commands, map_data: Res<Map
             country_def.color[1],
             country_def.color[2],
         );
-        let entity = spawn_country(&mut commands, &country_def.name, color);
-        info!("Created country: {} ({:?})", country_def.name, entity);
+
+        // Load flag texture
+        let flag_handle: Handle<Image> = asset_server.load(&country_def.flag);
+
+        let entity = commands
+            .spawn(CountryBundle::new(&country_def.name, color))
+            .insert(Flag(flag_handle))
+            .id();
+
+        info!(
+            "Created country: {} ({:?}) with flag: {}",
+            country_def.name, entity, country_def.flag
+        );
     }
 }
 
@@ -173,7 +195,7 @@ pub(crate) enum CountryTab {
 pub(crate) fn display_country_panel(
     mut contexts: EguiContexts,
     mut selected_country: ResMut<SelectedCountry>,
-    countries: Query<(Entity, &DisplayName, &Coffer, &MapColor), With<Country>>,
+    countries: Query<(Entity, &DisplayName, &Coffer, &MapColor, Option<&Flag>), With<Country>>,
     player: Res<Player>,
     war_relations: Query<&WarRelations>,
     wars: Res<Wars>,
@@ -183,6 +205,8 @@ pub(crate) fn display_country_panel(
     provinces: Query<(Entity, &Province, &Owner, Option<&Occupied>)>,
     mut current_tab: Local<CountryTab>,
     mut selected_provinces_for_peace: Local<HashSet<Entity>>,
+    mut country_flags: ResMut<CountryFlags>,
+    images: Res<Assets<Image>>,
 ) {
     let country = match selected_country.get() {
         Some(entity) => entity,
@@ -193,12 +217,32 @@ pub(crate) fn display_country_panel(
         }
     };
 
-    let Ok((country_entity, name, coffer, color)) = countries.get(country) else {
+    let Ok((country_entity, name, coffer, color, maybe_flag)) = countries.get(country) else {
         return;
     };
 
     let is_player = Some(country) == player.country;
     let player_country = player.country;
+
+    // Register flag texture with egui if not already done
+    let flag_texture_id: Option<TextureId> = if let Some(flag) = maybe_flag {
+        if let Some(texture_id) = country_flags.textures.get(&country_entity) {
+            Some(*texture_id)
+        } else if images.get(&flag.0).is_some() {
+            // Image is loaded, register it with egui
+            info!("Registering flag texture for country {:?}", country_entity);
+            let texture_id = contexts.add_image(EguiTextureHandle::Strong(flag.0.clone()));
+            country_flags.textures.insert(country_entity, texture_id);
+            Some(texture_id)
+        } else {
+            // Image not loaded yet
+            info!("Flag image not loaded yet for country {:?}", country_entity);
+            None
+        }
+    } else {
+        info!("No flag component for country {:?}", country_entity);
+        None
+    };
 
     let ctx = match contexts.ctx_mut() {
         Ok(c) => c,
@@ -214,8 +258,17 @@ pub(crate) fn display_country_panel(
         .resizable(false)
         .default_width(280.0)
         .show(ctx, |ui| {
-            // Header
+            // Header with flag
             ui.horizontal(|ui| {
+                // Display flag if available
+                if let Some(texture_id) = flag_texture_id {
+                    ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                        texture_id,
+                        egui::vec2(48.0, 32.0),
+                    )));
+                    ui.add_space(8.0);
+                }
+
                 ui.add(egui::Label::new(
                     RichText::new(&name.0)
                         .font(egui::FontId::proportional(22.0))

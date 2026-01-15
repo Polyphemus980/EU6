@@ -264,7 +264,7 @@ impl Terrain {
 }
 
 /// Path to the map file
-const MAP_FILE_PATH: &str = "assets/maps/default.json";
+const MAP_FILE_PATH: &str = "assets/maps/map.json";
 
 /// JSON structures for map loading
 #[derive(Deserialize)]
@@ -277,6 +277,7 @@ struct MapFile {
 pub(crate) struct CountryDef {
     pub(crate) name: String,
     pub(crate) color: [f32; 3],
+    pub(crate) flag: String,
 }
 
 #[derive(Deserialize)]

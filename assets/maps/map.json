@@ -1,44 +1,49 @@
 {
   "countries": [
     {
-      "name": "Italia",
+      "name": "Italy",
       "color": [
         0.0,
         0.6,
         0.3
-      ]
+      ],
+      "flag": "flags/italy.png"
     },
     {
-      "name": "Francia",
+      "name": "France",
       "color": [
         0.2,
         0.3,
         0.8
-      ]
+      ],
+      "flag": "flags/france.png"
     },
     {
-      "name": "Britannia",
+      "name": "Great Britain",
       "color": [
         0.8,
         0.1,
         0.2
-      ]
+      ],
+      "flag": "flags/britain.png"
     },
     {
-      "name": "Germania",
+      "name": "Germany",
       "color": [
         0.8,
         0.8,
         0.2
-      ]
+      ],
+      "flag": "flags/germany.png"
     },
     {
-      "name": "Hispania",
+      "name": "Spain",
       "color": [
         0.9,
         0.6,
         0.1
-      ]
+      ],
+      "flag": "flags/spain.png"
     }
   ],
   "provinces": [
@@ -47,287 +52,287 @@
       "r": 0,
       "terrain": "Plains",
       "name": "Roma",
-      "owner": "Italia"
+      "owner": "Italy"
     },
     {
       "q": 1,
       "r": 0,
       "terrain": "Hills",
       "name": "Firenze",
-      "owner": "Italia"
+      "owner": "Italy"
     },
     {
       "q": 0,
       "r": 1,
       "terrain": "Plains",
       "name": "Napoli",
-      "owner": "Italia"
+      "owner": "Italy"
     },
     {
       "q": -1,
       "r": 1,
       "terrain": "Forest",
       "name": "Sardinia",
-      "owner": "Italia"
+      "owner": "Italy"
     },
     {
       "q": 1,
       "r": -1,
       "terrain": "Hills",
       "name": "Milano",
-      "owner": "Italia"
+      "owner": "Italy"
     },
     {
       "q": -1,
       "r": 0,
       "terrain": "Plains",
       "name": "Genoa",
-      "owner": "Italia"
+      "owner": "Italy"
     },
     {
       "q": 0,
       "r": -1,
       "terrain": "Plains",
       "name": "Venice",
-      "owner": "Italia"
+      "owner": "Italy"
     },
     {
       "q": 2,
       "r": 0,
       "terrain": "Plains",
       "name": "Paris",
-      "owner": "Francia"
+      "owner": "France"
     },
     {
       "q": 2,
       "r": 1,
       "terrain": "Forest",
       "name": "Lyon",
-      "owner": "Francia"
+      "owner": "France"
     },
     {
       "q": 3,
       "r": 0,
       "terrain": "Plains",
       "name": "Marseille",
-      "owner": "Francia"
+      "owner": "France"
     },
     {
       "q": 3,
       "r": -1,
       "terrain": "Hills",
       "name": "Bordeaux",
-      "owner": "Francia"
+      "owner": "France"
     },
     {
       "q": 2,
       "r": -1,
       "terrain": "Plains",
       "name": "Orleans",
-      "owner": "Francia"
+      "owner": "France"
     },
     {
       "q": 3,
       "r": 1,
       "terrain": "Plains",
       "name": "Nice",
-      "owner": "Francia"
+      "owner": "France"
     },
     {
       "q": 4,
       "r": 0,
       "terrain": "Forest",
       "name": "Toulouse",
-      "owner": "Francia"
+      "owner": "France"
     },
     {
       "q": 4,
       "r": -1,
       "terrain": "Plains",
       "name": "Normandy",
-      "owner": "Francia"
+      "owner": "France"
     },
     {
       "q": 1,
       "r": 1,
       "terrain": "Plains",
       "name": "Provence",
-      "owner": "Francia"
+      "owner": "France"
     },
     {
       "q": -2,
       "r": 0,
       "terrain": "Hills",
       "name": "London",
-      "owner": "Britannia"
+      "owner": "Great Britain"
     },
     {
       "q": -2,
       "r": 1,
       "terrain": "Plains",
       "name": "York",
-      "owner": "Britannia"
+      "owner": "Great Britain"
     },
     {
       "q": -3,
       "r": 0,
       "terrain": "Forest",
       "name": "Edinburgh",
-      "owner": "Britannia"
+      "owner": "Great Britain"
     },
     {
       "q": -3,
       "r": 1,
       "terrain": "Hills",
       "name": "Dublin",
-      "owner": "Britannia"
+      "owner": "Great Britain"
     },
     {
       "q": -2,
       "r": -1,
       "terrain": "Plains",
       "name": "Wales",
-      "owner": "Britannia"
+      "owner": "Great Britain"
     },
     {
       "q": -3,
       "r": 2,
       "terrain": "Plains",
       "name": "Cornwall",
-      "owner": "Britannia"
+      "owner": "Great Britain"
     },
     {
       "q": -4,
       "r": 1,
       "terrain": "Hills",
       "name": "Belfast",
-      "owner": "Britannia"
+      "owner": "Great Britain"
     },
     {
       "q": -4,
       "r": 2,
       "terrain": "Plains",
       "name": "Glasgow",
-      "owner": "Britannia"
+      "owner": "Great Britain"
     },
     {
       "q": -1,
       "r": -1,
       "terrain": "Plains",
       "name": "Canterbury",
-      "owner": "Britannia"
+      "owner": "Great Britain"
     },
     {
       "q": 0,
       "r": -2,
       "terrain": "Hills",
       "name": "Berlin",
-      "owner": "Germania"
+      "owner": "Germany"
     },
     {
       "q": 1,
       "r": -2,
       "terrain": "Plains",
       "name": "Hamburg",
-      "owner": "Germania"
+      "owner": "Germany"
     },
     {
       "q": -1,
       "r": -2,
       "terrain": "Forest",
       "name": "Munich",
-      "owner": "Germania"
+      "owner": "Germany"
     },
     {
       "q": 0,
       "r": -3,
       "terrain": "Hills",
       "name": "Frankfurt",
-      "owner": "Germania"
+      "owner": "Germany"
     },
     {
       "q": 1,
       "r": -3,
       "terrain": "Plains",
       "name": "Cologne",
-      "owner": "Germania"
+      "owner": "Germany"
     },
     {
       "q": 2,
       "r": -2,
       "terrain": "Plains",
       "name": "Vienna",
-      "owner": "Germania"
+      "owner": "Germany"
     },
     {
       "q": -1,
       "r": -3,
       "terrain": "Mountains",
       "name": "Zurich",
-      "owner": "Germania"
+      "owner": "Germany"
     },
     {
       "q": 2,
       "r": -3,
       "terrain": "Hills",
       "name": "Prague",
-      "owner": "Germania"
+      "owner": "Germany"
     },
     {
       "q": 0,
       "r": 2,
       "terrain": "Desert",
       "name": "Madrid",
-      "owner": "Hispania"
+      "owner": "Spain"
     },
     {
       "q": 1,
       "r": 2,
       "terrain": "Plains",
       "name": "Barcelona",
-      "owner": "Hispania"
+      "owner": "Spain"
     },
     {
       "q": -1,
       "r": 2,
       "terrain": "Hills",
       "name": "Lisbon",
-      "owner": "Hispania"
+      "owner": "Spain"
     },
     {
       "q": 0,
       "r": 3,
       "terrain": "Desert",
       "name": "Seville",
-      "owner": "Hispania"
+      "owner": "Spain"
     },
     {
       "q": 1,
       "r": 3,
       "terrain": "Plains",
       "name": "Valencia",
-      "owner": "Hispania"
+      "owner": "Spain"
     },
     {
       "q": -1,
       "r": 3,
       "terrain": "Desert",
       "name": "Porto",
-      "owner": "Hispania"
+      "owner": "Spain"
     },
     {
       "q": 2,
       "r": 2,
       "terrain": "Hills",
       "name": "Zaragoza",
-      "owner": "Hispania"
+      "owner": "Spain"
     },
     {
       "q": -2,
       "r": 3,
       "terrain": "Desert",
       "name": "Granada",
-      "owner": "Hispania"
+      "owner": "Spain"
     },
     {
       "q": 5,
@@ -534,4 +539,6 @@
     }
   ]
 }
+
+
 
